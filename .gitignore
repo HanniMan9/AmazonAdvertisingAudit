@@ -15,6 +15,13 @@ venv/
 # IDE / Editors
 .vscode/
 .idea/
+.windsurf/
+
+# Client data and configurations
+clients/
+client_sessions/
+client_settings/
+*.json
 
 # Data/exports/uploads (adjust to taste)
 data/
@@ -44,3 +51,19 @@ Icon?
 build/
 dist/
 *.spec
+
+# Documentation and planning files (exclude from public repo)
+*.md
+!README.md
+
+# Backup files
+app_backup.py
+*_backup.*
+
+# Large zip files and archives
+*.zip
+
+# Cache and temporary files
+.cache/
+tmp/
+temp/

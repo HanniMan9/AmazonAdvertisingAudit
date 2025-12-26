@@ -55,6 +55,14 @@ from sklearn.linear_model import LinearRegression
 from PIL import Image
 from wordcloud import WordCloud, STOPWORDS
 import matplotlib.pyplot as plt
+
+# Increase Pandas Styler cell limit so large tables (e.g., Search Term Performance)
+# can still be rendered with formatting without hitting the default 262,144 cap.
+try:
+    pd.set_option("styler.render.max_elements", 1_000_000)
+except Exception:
+    # If the option is unavailable in older Pandas versions, ignore gracefully.
+    pass
 import uuid
 import functools
 from contextlib import contextmanager
@@ -902,7 +910,7 @@ def style_acos(df, target_acos=None, column_config=None, use_avg_as_fallback=Fal
                 continue
             elif col == 'ROAS':
                 fmt_dict[col] = lambda x: f"{x:.2f}" if pd.notnull(x) else "0.00"
-            elif col in ['ACoS', 'TACoS', 'CVR', 'CTR', '% Ad Sales', '% of Spend', '% of Ad Sales', 'Ad Traffic % Sessions']:
+            elif col in ['ACoS', 'TACoS', 'CVR', 'CTR', '% Ad Sales', '% of Spend', '% of Ad Sales', '% of Total Sales', 'Ad Sales % of Total', 'Ad Traffic % of Total', 'Ad Traffic % Sessions']:
                 fmt_dict[col] = lambda x: f"{x:.2f}%" if pd.notnull(x) else "0.00%"
             elif col in ['CPC', 'AOV', 'CPA', 'Bid']:
                 fmt_dict[col] = lambda x: f"${x:.2f}" if pd.notnull(x) else "$0.00"
@@ -5482,12 +5490,14 @@ def get_campaign_performance_data(bulk_data, client_config=None):
             aov = (ad_sales / orders) if orders > 0 else 0
             
             # Get product group from campaign tagging
+            # Only assign 'Untagged Group' if the campaign exists in campaign_tags_data but has no tag_1
+            # If the campaign isn't in campaign_tags_data at all, leave product_group empty (won't be included in Product Group summary)
             product_group = ''
             if client_config and 'campaign_tags_data' in client_config:
-                campaign_info = client_config['campaign_tags_data'].get(campaign_name, {})
-                product_group = campaign_info.get('tag_1', '') or 'Untagged Group'
-            if not product_group:
-                product_group = 'Untagged Group'
+                if campaign_name in client_config['campaign_tags_data']:
+                    campaign_info = client_config['campaign_tags_data'][campaign_name]
+                    product_group = campaign_info.get('tag_1', '') or 'Untagged Group'
+                # If campaign not in campaign_tags_data, product_group stays empty
             
             campaign_data.append({
                 'Ad Type': ad_type,
@@ -5722,22 +5732,14 @@ padding-bottom: 0.5rem !important;
     left: 0;
     right: 0;
     z-index: 9999;
-    background-color: rgba(30, 30, 30, 0.95);
-    padding: 12px 16px;
-    margin-bottom: 20px;
+    background-color: rgba(17, 17, 17, 0.97);
+    padding: 8px 16px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-    justify-content: flex-start;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(255, 215, 0, 0.2);
     width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    white-space: nowrap;
+    box-sizing: border-box;
 }
 
 /* Add padding to the top of the main content to account for fixed navbar */
@@ -5758,6 +5760,21 @@ padding-bottom: 0.5rem !important;
 /* Add some space above the first section header */
 .dashboard-section:first-of-type {
     margin-top: 20px;
+}
+
+.audit-nav-bar {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 0.35rem 0;
+    margin-top: 0.75rem;
+    margin-bottom: 1.25rem;
+    background-color: #111111;
+    border-bottom: 1px solid rgba(255, 215, 0, 0.16);
 }
 
 .audit-nav-link {
@@ -7092,16 +7109,10 @@ if st.session_state.client_config:
             
             # Show description based on upload method
             if st.session_state.upload_method == "Bulk File":
-                st.markdown("Pull for desired date range. Include SP and SB Search Term Reports")
+                # Bulk file instructions now live in the App Instructions section above
+                pass
             else:
                 st.markdown("Upload any of the Companion exports (ASIN, Search Term, Targeting) from your in-house software. You can process with one or more files.")
-            
-            st.markdown("Used for the following:")
-            st.markdown("* Advertising Audit - Ad Performance Metrics")
-            st.markdown("* Advertising Audit - Product Allocation Analysis")
-            st.markdown("* Advertising Audit - Targeting")
-            st.markdown("* Client Settings Center - Updating Advertised ASINs")
-            st.markdown("* Client Settings Center - Campaign Tagging")
         
         with col2:
             st.markdown("### Sales Report Upload")
@@ -7194,11 +7205,7 @@ if st.session_state.client_config:
                     else:
                         st.warning('Sales report processed, but no data was extracted.')
                 
-            st.markdown("Can be either Vendor Central Sales Report or Seller Central Business Reports By Child ASIN")
-            st.markdown("Used for the following:")
-            st.markdown("* Client Overview - Calculating Total Sales, TACoS, Sessions, etc.")
-            st.markdown("* Client Settings Center - Updating Advertised ASINs")
-            st.markdown("* Client Settings Center - Product Tagging")
+            # Detailed Vendor/Seller Central instructions now live in the App Instructions section above
         
         # Display uploaded data viewer section
         st.markdown("---")
@@ -7277,6 +7284,38 @@ if st.session_state.client_config:
                     st.session_state.new_sales_asins = []
                     st.rerun()
         # --- End ASIN prompt section ---
+
+        # App Instructions section
+        with st.expander("App Instructions", expanded=False):
+            st.markdown("""**Ad Reports** – there are two options for uploading ad data: bulk file or companion exports""")
+            st.markdown("""- Bulk file: go to the **Bulk Operations** page, choose the desired date range, then check the boxes shown below for all features to populate on the audit""")
+            st.markdown("""    - The audit should still run without search term data, placement data, or if an ad type is missing""")
+            st.markdown("""    - **Sponsored Brands multi-ad group data** has all necessary data that **Sponsored Brands data** does not and is preferred in all cases""")
+
+            img_col_left, img_col_center, img_col_right = st.columns([1, 2, 1])
+            with img_col_center:
+                st.image(
+                    "assets/bulk_instructions.png",
+                    caption="Required bulk file options for Ad Reports",
+                    width=300,
+                )
+
+            st.markdown("""- Companion Reports: Companion reports can be used for QBRs/ABRs, or any time you need data for longer than 60 days. Placement data is not available for companion exports""")
+            st.markdown("""    - ASIN Export – go to the **ASINs** tab → open exporter → pick date range → select all fields""")
+            st.markdown("""    - Search Term Export – go to the **Search Terms** tab → open exporter → pick date range → select all fields""")
+            st.markdown("""    - Targeting Export – go to the **Targeting** tab → open exporter → pick date range → select all fields""")
+
+            st.markdown("""---""")
+            st.markdown("""**Vendor/Seller Central report**""")
+            st.markdown("""- Once ad data is downloaded, go to **Vendor Central (VC)** or **Seller Central (SC)** and download reports for the matching time period""")
+            st.markdown("""    - If you want Parent/ASIN data, make sure a **Parent ASIN** column is included in the exports""")
+            st.markdown("""    - SC: **Detail Page Sales and Traffic By Child Item**""")
+            st.markdown("""    - VC: **Sales**""")
+            st.markdown("""        - For Vendor Central, traffic metrics are not included in the **Sales** export. You must add a column to the Sales export called **Glance Views** or **Sessions** and use VLOOKUP or INDEX/MATCH to marry the Glance Views per ASIN, then re-save the file.""")
+
+            st.markdown("""Step 4: Choose Client (load/create)""")
+            st.markdown("""Step 5: Upload Ad Data (companion or bulk file) and VC/SC report""")
+
         # File Structure Checker section for uploaded files
         st.markdown("""
         <h3 style='font-family:"Inter","Roboto","Segoe UI",Arial,sans-serif; font-size:1.3rem; font-weight:600; color:#BFA23A; margin-top:1.5rem; margin-bottom:1.0rem;'>
@@ -9189,10 +9228,10 @@ if st.session_state.client_config:
                 st.markdown("---")
                 view_mode = st.radio(
                     "Table View Mode",
-                    options=["Child ASIN View", "Parent/Child Hierarchy View"],
+                    options=["Child ASIN View", "Parent/Child Hierarchy View", "Tagging Priority View"],
                     index=0,
                     horizontal=True,
-                    help="Switch between flat child ASIN view and hierarchical parent/child view",
+                    help="Switch between flat child ASIN view, hierarchical parent/child view, and tagging-priority view for untagged ASINs",
                     key="branded_asin_view_mode"
                 )
                 st.markdown("""<div style='margin-bottom: 15px;'></div>""", unsafe_allow_html=True)
@@ -9618,6 +9657,461 @@ if st.session_state.client_config:
                         column_config=column_config
                     )
                     
+                elif view_mode == "Tagging Priority View":
+                    # -----------------------------------------------------------------------------
+                    # Tagging Priority View - Shows untagged ASINs and Campaigns with performance metrics
+                    # -----------------------------------------------------------------------------
+                    # -----------------------------------------------------------------------------
+                    # See Product Groups (same as other views)
+                    # -----------------------------------------------------------------------------
+                    with st.expander("See Product Groups", expanded=False):
+                        st.markdown("""<div style='margin-bottom: 15px;'></div>""", unsafe_allow_html=True)
+                        
+                        # Toggle for including Campaign Tagging Product Groups
+                        include_campaign_groups_priority = st.checkbox(
+                            "Include Product Groups from Campaign Tagging",
+                            value=True,
+                            key="asin_include_campaign_groups_priority",
+                            help="When checked, shows Product Groups from both Branded ASINs and Campaign Tagging tabs."
+                        )
+                        
+                        # Collect Product Groups from both sources
+                        branded_pgs_priority = set()
+                        campaign_pgs_priority = set()
+                        
+                        # From branded_asins_data
+                        for asin_info in st.session_state.client_config.get('branded_asins_data', {}).values():
+                            pg_val = str(asin_info.get('product_group', '')).strip()
+                            if pg_val and pg_val.lower() != 'none':
+                                branded_pgs_priority.add(pg_val)
+                        
+                        # From campaign_tags_data
+                        if include_campaign_groups_priority:
+                            for info in st.session_state.client_config.get('campaign_tags_data', {}).values():
+                                pg_val = str(info.get('tag_1', '')).strip()
+                                if pg_val and pg_val.lower() != 'none':
+                                    campaign_pgs_priority.add(pg_val)
+                        
+                        # Combine and display
+                        all_pgs_priority = branded_pgs_priority.union(campaign_pgs_priority)
+                        
+                        if all_pgs_priority:
+                            styled_groups = []
+                            colors = ['#FFC107', '#FFF3C4']
+                            for idx, pg in enumerate(sorted(all_pgs_priority)):
+                                color = colors[idx % 2]
+                                # Add source indicator
+                                sources = []
+                                if pg in branded_pgs_priority:
+                                    sources.append("Branded ASINs")
+                                if pg in campaign_pgs_priority:
+                                    sources.append("Campaign Tagging")
+                                source_text = " & ".join(sources)
+                                styled_groups.append(f"<span style='color:{color};'>{pg}</span> <span style='color:#888; font-size:0.85em;'>({source_text})</span>")
+                            groups_html = "<br>".join(styled_groups)
+                            
+                            st.markdown(f"""<div style='margin-top: 10px; margin-bottom: 10px;'>
+                                <span style='font-weight: 500; color: #FFFFFF;'>Current Product Groups:</span><br>
+                                {groups_html}
+                            </div>""", unsafe_allow_html=True)
+                        else:
+                            st.info("No Product Groups found.")
+                    
+                    # Create tabs for ASINs and Campaigns
+                    priority_tab1, priority_tab2, priority_tab3 = st.tabs(["🏷️ Untagged ASINs", "📢 Untagged Campaigns", "🆕 Untracked ASINs"])
+                    
+                    with priority_tab1:
+                        # -----------------------------------------------------------------------------
+                        # Untagged ASINs Tab
+                        # -----------------------------------------------------------------------------
+                        # Get ASIN performance data if available
+                        asin_perf_data = st.session_state.get('asin_perf_df')
+                        
+                        # Build untagged ASINs dataframe with performance metrics
+                        untagged_asin_rows = []
+                        branded_asins_data = st.session_state.client_config.get('branded_asins_data', {})
+                        
+                        for asin, info in branded_asins_data.items():
+                            product_group = str(info.get('product_group', '')).strip()
+                            # Only include ASINs with blank Product Group
+                            if not product_group:
+                                row_data = {
+                                    'ASIN': asin,
+                                    'SKU': info.get('sku', ''),
+                                    'Product Title': info.get('product_title', 'Title not available'),
+                                    'Parent ASIN': info.get('parent_asin', ''),
+                                    'Product Group': '',  # Editable
+                                    'Spend': 0.0,
+                                    'Ad Sales': 0.0,
+                                    'Total Sales': 0.0
+                                }
+                                
+                                # Try to get performance metrics from asin_perf_df
+                                if asin_perf_data is not None and not asin_perf_data.empty:
+                                    asin_match = asin_perf_data[asin_perf_data['ASIN'] == asin]
+                                    if not asin_match.empty:
+                                        row_data['Spend'] = float(asin_match['Spend'].iloc[0]) if 'Spend' in asin_match.columns else 0.0
+                                        row_data['Ad Sales'] = float(asin_match['Ad Sales'].iloc[0]) if 'Ad Sales' in asin_match.columns else 0.0
+                                        row_data['Total Sales'] = float(asin_match['Total Sales'].iloc[0]) if 'Total Sales' in asin_match.columns else 0.0
+                                
+                                untagged_asin_rows.append(row_data)
+                        
+                        if untagged_asin_rows:
+                            untagged_asins_df = pd.DataFrame(untagged_asin_rows)
+                            # Sort by Spend descending (highest spend first)
+                            untagged_asins_df = untagged_asins_df.sort_values('Spend', ascending=False).reset_index(drop=True)
+                            
+                            # Summary metrics
+                            total_untagged = len(untagged_asins_df)
+                            total_spend = untagged_asins_df['Spend'].sum()
+                            total_ad_sales = untagged_asins_df['Ad Sales'].sum()
+                            total_sales = untagged_asins_df['Total Sales'].sum()
+                            
+                            st.markdown(f"""
+                            <div style='display: flex; gap: 20px; margin-bottom: 15px;'>
+                                <div style='background: rgba(255,193,7,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #ffc107; font-weight: 600;'>{total_untagged}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Untagged ASINs</span>
+                                </div>
+                                <div style='background: rgba(33,150,243,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #2196f3; font-weight: 600;'>${total_spend:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Spend</span>
+                                </div>
+                                <div style='background: rgba(76,175,80,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #4caf50; font-weight: 600;'>${total_ad_sales:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Ad Sales</span>
+                                </div>
+                                <div style='background: rgba(156,39,176,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #9c27b0; font-weight: 600;'>${total_sales:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Sales</span>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Filter controls
+                            filter_col1, filter_col2 = st.columns([0.5, 0.5])
+                            with filter_col1:
+                                asin_filter_text = st.text_input("Filter by ASIN or Title", key="priority_asin_filter")
+                            with filter_col2:
+                                min_spend_filter = st.number_input("Min Spend ($)", min_value=0.0, value=0.0, step=10.0, key="priority_asin_min_spend")
+                            
+                            # Apply filters
+                            display_df = untagged_asins_df.copy()
+                            if asin_filter_text:
+                                display_df = display_df[
+                                    display_df['ASIN'].str.contains(asin_filter_text, case=False, na=False) |
+                                    display_df['Product Title'].str.contains(asin_filter_text, case=False, na=False)
+                                ]
+                            if min_spend_filter > 0:
+                                display_df = display_df[display_df['Spend'] >= min_spend_filter]
+                            
+                            # Format currency columns for display
+                            display_df_formatted = display_df.copy()
+                            display_df_formatted['Spend'] = display_df_formatted['Spend'].apply(lambda x: f"${x:,.2f}")
+                            display_df_formatted['Ad Sales'] = display_df_formatted['Ad Sales'].apply(lambda x: f"${x:,.2f}")
+                            display_df_formatted['Total Sales'] = display_df_formatted['Total Sales'].apply(lambda x: f"${x:,.2f}")
+                            
+                            # Column config for editable table
+                            asin_column_config = {
+                                'ASIN': st.column_config.TextColumn('ASIN', disabled=True),
+                                'SKU': st.column_config.TextColumn('SKU', disabled=True),
+                                'Product Title': st.column_config.TextColumn('Product Title', disabled=True, width="large"),
+                                'Parent ASIN': st.column_config.TextColumn('Parent ASIN', disabled=True),
+                                'Product Group': st.column_config.TextColumn('Product Group', help="Enter a Product Group to tag this ASIN"),
+                                'Spend': st.column_config.TextColumn('Spend', disabled=True),
+                                'Ad Sales': st.column_config.TextColumn('Ad Sales', disabled=True),
+                                'Total Sales': st.column_config.TextColumn('Total Sales', disabled=True)
+                            }
+                            
+                            # Display editable table
+                            edited_priority_asins = st.data_editor(
+                                display_df_formatted,
+                                key="priority_asins_editor",
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config=asin_column_config
+                            )
+                            
+                            # Save button for ASINs
+                            if st.button("💾 Save ASIN Tags", key="save_priority_asin_tags", type="primary"):
+                                updates_made = 0
+                                for idx, row in edited_priority_asins.iterrows():
+                                    asin = row['ASIN']
+                                    new_pg = str(row.get('Product Group', '')).strip()
+                                    if new_pg and asin in st.session_state.client_config['branded_asins_data']:
+                                        st.session_state.client_config['branded_asins_data'][asin]['product_group'] = new_pg
+                                        updates_made += 1
+                                
+                                if updates_made > 0:
+                                    save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                    # Clear editor states
+                                    if 'priority_asins_editor' in st.session_state:
+                                        del st.session_state['priority_asins_editor']
+                                    if 'branded_asins_editor' in st.session_state:
+                                        del st.session_state['branded_asins_editor']
+                                    st.success(f"✅ Updated {updates_made} ASIN(s) with Product Groups")
+                                    st.rerun()
+                                else:
+                                    st.info("No changes to save. Enter Product Groups in the table above.")
+                        else:
+                            st.success("🎉 All ASINs have been tagged with a Product Group!")
+                    
+                    with priority_tab2:
+                        # -----------------------------------------------------------------------------
+                        # Untagged Campaigns Tab
+                        # -----------------------------------------------------------------------------
+                        # Get campaign performance data if available
+                        campaign_perf_data = None
+                        if 'bulk_data' in st.session_state and st.session_state.bulk_data:
+                            try:
+                                campaign_perf_data = get_campaign_performance_data(
+                                    st.session_state.bulk_data,
+                                    st.session_state.client_config
+                                )
+                            except Exception as e:
+                                st.session_state.debug_messages.append(f"[Tagging Priority] Error getting campaign performance: {e}")
+                        
+                        # Build untagged campaigns dataframe with performance metrics
+                        untagged_campaign_rows = []
+                        campaign_tags_data = st.session_state.client_config.get('campaign_tags_data', {})
+                        
+                        for campaign_name, info in campaign_tags_data.items():
+                            product_group = str(info.get('tag_1', '')).strip()
+                            # Only include campaigns with blank Product Group
+                            if not product_group:
+                                row_data = {
+                                    'Campaign Name': campaign_name,
+                                    'Campaign Type': info.get('campaign_type', ''),
+                                    'State': info.get('state', ''),
+                                    'Product Group': '',  # Editable
+                                    'Spend': float(info.get('spend', 0)),
+                                    'Ad Sales': 0.0
+                                }
+                                
+                                # Try to get Ad Sales from campaign performance data
+                                if campaign_perf_data is not None and not campaign_perf_data.empty and 'Campaign Name' in campaign_perf_data.columns:
+                                    camp_match = campaign_perf_data[campaign_perf_data['Campaign Name'] == campaign_name]
+                                    if not camp_match.empty:
+                                        row_data['Ad Sales'] = float(camp_match['Ad Sales'].iloc[0]) if 'Ad Sales' in camp_match.columns else 0.0
+                                        # Update spend from performance data if available (more accurate)
+                                        if 'Spend' in camp_match.columns:
+                                            perf_spend = float(camp_match['Spend'].iloc[0])
+                                            if perf_spend > 0:
+                                                row_data['Spend'] = perf_spend
+                                
+                                untagged_campaign_rows.append(row_data)
+                        
+                        if untagged_campaign_rows:
+                            untagged_campaigns_df = pd.DataFrame(untagged_campaign_rows)
+                            # Sort by Spend descending (highest spend first)
+                            untagged_campaigns_df = untagged_campaigns_df.sort_values('Spend', ascending=False).reset_index(drop=True)
+                            
+                            # Summary metrics
+                            total_untagged_camps = len(untagged_campaigns_df)
+                            total_camp_spend = untagged_campaigns_df['Spend'].sum()
+                            total_camp_ad_sales = untagged_campaigns_df['Ad Sales'].sum()
+                            
+                            st.markdown(f"""
+                            <div style='display: flex; gap: 20px; margin-bottom: 15px;'>
+                                <div style='background: rgba(255,193,7,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #ffc107; font-weight: 600;'>{total_untagged_camps}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Untagged Campaigns</span>
+                                </div>
+                                <div style='background: rgba(33,150,243,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #2196f3; font-weight: 600;'>${total_camp_spend:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Spend</span>
+                                </div>
+                                <div style='background: rgba(76,175,80,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #4caf50; font-weight: 600;'>${total_camp_ad_sales:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Ad Sales</span>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Filter controls
+                            camp_filter_col1, camp_filter_col2, camp_filter_col3 = st.columns([0.4, 0.3, 0.3])
+                            with camp_filter_col1:
+                                camp_filter_text = st.text_input("Filter by Campaign Name", key="priority_camp_filter")
+                            with camp_filter_col2:
+                                # Get available campaign types
+                                available_types = sorted(untagged_campaigns_df['Campaign Type'].dropna().unique().tolist())
+                                camp_type_filter = st.multiselect("Campaign Type", options=available_types, key="priority_camp_type_filter")
+                            with camp_filter_col3:
+                                camp_min_spend = st.number_input("Min Spend ($)", min_value=0.0, value=0.0, step=10.0, key="priority_camp_min_spend")
+                            
+                            # Apply filters
+                            display_camps_df = untagged_campaigns_df.copy()
+                            if camp_filter_text:
+                                display_camps_df = display_camps_df[
+                                    display_camps_df['Campaign Name'].str.contains(camp_filter_text, case=False, na=False)
+                                ]
+                            if camp_type_filter:
+                                display_camps_df = display_camps_df[display_camps_df['Campaign Type'].isin(camp_type_filter)]
+                            if camp_min_spend > 0:
+                                display_camps_df = display_camps_df[display_camps_df['Spend'] >= camp_min_spend]
+                            
+                            # Format currency columns for display
+                            display_camps_formatted = display_camps_df.copy()
+                            display_camps_formatted['Spend'] = display_camps_formatted['Spend'].apply(lambda x: f"${x:,.2f}")
+                            display_camps_formatted['Ad Sales'] = display_camps_formatted['Ad Sales'].apply(lambda x: f"${x:,.2f}")
+                            
+                            # Column config for editable table
+                            camp_column_config = {
+                                'Campaign Name': st.column_config.TextColumn('Campaign Name', disabled=True, width="large"),
+                                'Campaign Type': st.column_config.TextColumn('Campaign Type', disabled=True),
+                                'State': st.column_config.TextColumn('State', disabled=True),
+                                'Product Group': st.column_config.TextColumn('Product Group', help="Enter a Product Group to tag this campaign"),
+                                'Spend': st.column_config.TextColumn('Spend', disabled=True),
+                                'Ad Sales': st.column_config.TextColumn('Ad Sales', disabled=True)
+                            }
+                            
+                            # Display editable table
+                            edited_priority_camps = st.data_editor(
+                                display_camps_formatted,
+                                key="priority_campaigns_editor",
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config=camp_column_config
+                            )
+                            
+                            # Save button for Campaigns
+                            if st.button("💾 Save Campaign Tags", key="save_priority_camp_tags", type="primary"):
+                                updates_made = 0
+                                for idx, row in edited_priority_camps.iterrows():
+                                    campaign_name = row['Campaign Name']
+                                    new_pg = str(row.get('Product Group', '')).strip()
+                                    if new_pg and campaign_name in st.session_state.client_config['campaign_tags_data']:
+                                        st.session_state.client_config['campaign_tags_data'][campaign_name]['tag_1'] = new_pg
+                                        updates_made += 1
+                                
+                                if updates_made > 0:
+                                    save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                    # Clear editor states
+                                    if 'priority_campaigns_editor' in st.session_state:
+                                        del st.session_state['priority_campaigns_editor']
+                                    if 'campaign_tags_editor' in st.session_state:
+                                        del st.session_state['campaign_tags_editor']
+                                    st.success(f"✅ Updated {updates_made} campaign(s) with Product Groups")
+                                    st.rerun()
+                                else:
+                                    st.info("No changes to save. Enter Product Groups in the table above.")
+                        else:
+                            st.success("🎉 All campaigns have been tagged with a Product Group!")
+                    
+                    with priority_tab3:
+                        # -----------------------------------------------------------------------------
+                        # Untracked ASINs Tab - ASINs in bulk file but NOT in Branded ASINs
+                        # -----------------------------------------------------------------------------
+                        asin_perf_data = st.session_state.get('asin_perf_df')
+                        branded_asins_data = st.session_state.client_config.get('branded_asins_data', {})
+                        
+                        # Get set of tracked ASINs (in branded_asins_data)
+                        tracked_asins_set = {str(a).strip().upper() for a in branded_asins_data.keys()}
+                        
+                        # Find ASINs in asin_perf_df that are NOT in branded_asins_data
+                        untracked_rows = []
+                        if asin_perf_data is not None and not asin_perf_data.empty:
+                            for _, row in asin_perf_data.iterrows():
+                                asin = str(row.get('ASIN', '')).strip().upper()
+                                if asin and asin not in tracked_asins_set:
+                                    untracked_rows.append({
+                                        'ASIN': row.get('ASIN', ''),
+                                        'SKU': row.get('SKU', ''),
+                                        'Product Title': row.get('Product Title', ''),
+                                        'Spend': float(row.get('Spend', 0)),
+                                        'Ad Sales': float(row.get('Ad Sales', 0)),
+                                        'Total Sales': float(row.get('Total Sales', 0)),
+                                        'Clicks': int(row.get('Clicks', 0)),
+                                        'Orders': int(row.get('Orders', 0))
+                                    })
+                        
+                        if untracked_rows:
+                            untracked_df = pd.DataFrame(untracked_rows)
+                            # Sort by Spend descending
+                            untracked_df = untracked_df.sort_values('Spend', ascending=False).reset_index(drop=True)
+                            
+                            # Summary metrics
+                            total_untracked = len(untracked_df)
+                            total_spend = untracked_df['Spend'].sum()
+                            total_ad_sales = untracked_df['Ad Sales'].sum()
+                            total_sales = untracked_df['Total Sales'].sum()
+                            
+                            st.markdown(f"""
+                            <div style='display: flex; gap: 20px; margin-bottom: 15px;'>
+                                <div style='background: rgba(255,87,34,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #ff5722; font-weight: 600;'>{total_untracked}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Untracked ASINs</span>
+                                </div>
+                                <div style='background: rgba(33,150,243,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #2196f3; font-weight: 600;'>${total_spend:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Spend</span>
+                                </div>
+                                <div style='background: rgba(76,175,80,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #4caf50; font-weight: 600;'>${total_ad_sales:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Ad Sales</span>
+                                </div>
+                                <div style='background: rgba(156,39,176,0.1); padding: 10px 15px; border-radius: 5px;'>
+                                    <span style='color: #9c27b0; font-weight: 600;'>${total_sales:,.2f}</span>
+                                    <span style='color: #888; font-size: 0.85em;'> Total Sales</span>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown("""
+                            <div style='padding: 8px 12px; background-color: rgba(255, 87, 34, 0.1); border-left: 3px solid #ff5722; border-radius: 3px; margin-bottom: 15px;'>
+                                <span style='color: #aaa; font-size: 0.9em;'>These ASINs appear in your bulk file but are not in your Branded ASINs list. Add them to track their performance by Product Group.</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Filter controls
+                            filter_col1, filter_col2 = st.columns([0.5, 0.5])
+                            with filter_col1:
+                                untracked_filter_text = st.text_input("Filter by ASIN or SKU", key="untracked_asin_filter")
+                            with filter_col2:
+                                untracked_min_spend = st.number_input("Min Spend ($)", min_value=0.0, value=0.0, step=10.0, key="untracked_min_spend")
+                            
+                            # Apply filters
+                            display_untracked = untracked_df.copy()
+                            if untracked_filter_text:
+                                display_untracked = display_untracked[
+                                    display_untracked['ASIN'].astype(str).str.contains(untracked_filter_text, case=False, na=False) |
+                                    display_untracked['SKU'].astype(str).str.contains(untracked_filter_text, case=False, na=False)
+                                ]
+                            if untracked_min_spend > 0:
+                                display_untracked = display_untracked[display_untracked['Spend'] >= untracked_min_spend]
+                            
+                            # Format for display
+                            display_untracked_fmt = display_untracked.copy()
+                            display_untracked_fmt['Spend'] = display_untracked_fmt['Spend'].apply(lambda x: f"${x:,.2f}")
+                            display_untracked_fmt['Ad Sales'] = display_untracked_fmt['Ad Sales'].apply(lambda x: f"${x:,.2f}")
+                            display_untracked_fmt['Total Sales'] = display_untracked_fmt['Total Sales'].apply(lambda x: f"${x:,.2f}")
+                            
+                            # Column config
+                            untracked_col_config = {
+                                'ASIN': st.column_config.TextColumn('ASIN', width="medium"),
+                                'SKU': st.column_config.TextColumn('SKU', width="medium"),
+                                'Product Title': st.column_config.TextColumn('Product Title', width="large"),
+                                'Spend': st.column_config.TextColumn('Spend', width="small"),
+                                'Ad Sales': st.column_config.TextColumn('Ad Sales', width="small"),
+                                'Total Sales': st.column_config.TextColumn('Total Sales', width="small"),
+                                'Clicks': st.column_config.NumberColumn('Clicks', width="small"),
+                                'Orders': st.column_config.NumberColumn('Orders', width="small")
+                            }
+                            
+                            st.dataframe(
+                                display_untracked_fmt,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config=untracked_col_config
+                            )
+                            
+                            st.markdown(f"<span style='color: #888; font-size: 0.85em;'>Showing {len(display_untracked)} of {total_untracked} untracked ASINs</span>", unsafe_allow_html=True)
+                        else:
+                            st.success("🎉 All ASINs in your bulk file are tracked in Branded ASINs!")
+                    
+                    # Set edited_asins_df to empty for the action buttons (they won't be used in this view)
+                    edited_asins_df = pd.DataFrame()
+                
                 else:
                     # -----------------------------------------------------------------------------
                     # Child ASIN View (Original Flat View)
@@ -9693,145 +10187,146 @@ if st.session_state.client_config:
                         hide_index=True
                     )
 
-                # --- Action Buttons ---
-                col_save, col_remove, col_delete_sel, col_select_all = st.columns([1,1,1,1])
-                with col_save:
-                    if st.button("Save Changes", key="save_branded_asins"):
-                        if view_mode == "Parent/Child Hierarchy View":
-                            # Handle hierarchical view save
-                            parent_updates = {}  # Store parent product group updates
-                            
-                            for _, row in edited_asins_df.iterrows():
-                                asin = row['ASIN']
-                                level = row.get('Level', '')
+                # --- Action Buttons (not shown for Tagging Priority View which has its own buttons) ---
+                if view_mode != "Tagging Priority View":
+                    col_save, col_remove, col_delete_sel, col_select_all = st.columns([1,1,1,1])
+                    with col_save:
+                        if st.button("Save Changes", key="save_branded_asins"):
+                            if view_mode == "Parent/Child Hierarchy View":
+                                # Handle hierarchical view save
+                                parent_updates = {}  # Store parent product group updates
                                 
-                                if 'Parent' in level:
-                                    # Parent row - save Parent Product Group
-                                    parent_product_group = (row.get('Parent Product Group', '') or '').strip()
+                                for _, row in edited_asins_df.iterrows():
+                                    asin = row['ASIN']
+                                    level = row.get('Level', '')
                                     
-                                    # Store for propagation to children
-                                    parent_updates[asin] = parent_product_group
+                                    if 'Parent' in level:
+                                        # Parent row - save Parent Product Group
+                                        parent_product_group = (row.get('Parent Product Group', '') or '').strip()
+                                        
+                                        # Store for propagation to children
+                                        parent_updates[asin] = parent_product_group
+                                        
+                                        # Create or update parent ASIN entry
+                                        if asin not in st.session_state.client_config['branded_asins_data']:
+                                            st.session_state.client_config['branded_asins_data'][asin] = {
+                                                'product_title': 'Parent ASIN',
+                                                'product_group': '',
+                                                'parent_asin': '',
+                                                'parent_product_group': parent_product_group,
+                                                'category': '',
+                                                'tag_1': '',
+                                                'tag_2': '',
+                                                'tag_3': '',
+                                                'sku': ''
+                                            }
+                                        else:
+                                            st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = parent_product_group
                                     
-                                    # Create or update parent ASIN entry
-                                    if asin not in st.session_state.client_config['branded_asins_data']:
-                                        st.session_state.client_config['branded_asins_data'][asin] = {
-                                            'product_title': 'Parent ASIN',
-                                            'product_group': '',
-                                            'parent_asin': '',
-                                            'parent_product_group': parent_product_group,
-                                            'category': '',
-                                            'tag_1': '',
-                                            'tag_2': '',
-                                            'tag_3': '',
-                                            'sku': ''
-                                        }
-                                    else:
-                                        st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = parent_product_group
+                                    elif 'Child' in level or 'Orphan' in level:
+                                        # Child row - save Product Group and tags
+                                        product_group = (row.get('Product Group', '') or '').strip()
+                                        parent_asin = (row.get('Parent ASIN', '') or '').strip()
+                                        
+                                        tag_1 = (row.get('Tag 1', '') or '').strip()
+                                        tag_2 = (row.get('Tag 2', '') or '').strip()
+                                        tag_3 = (row.get('Tag 3', '') or '').strip()
+                                        
+                                        if asin in st.session_state.client_config['branded_asins_data']:
+                                            st.session_state.client_config['branded_asins_data'][asin]['product_group'] = product_group
+                                            st.session_state.client_config['branded_asins_data'][asin]['tag_1'] = tag_1
+                                            st.session_state.client_config['branded_asins_data'][asin]['tag_2'] = tag_2
+                                            st.session_state.client_config['branded_asins_data'][asin]['tag_3'] = tag_3
+                                            
+                                            # Update Parent Product Group from parent if available
+                                            if parent_asin and parent_asin in parent_updates:
+                                                st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = parent_updates[parent_asin]
                                 
-                                elif 'Child' in level or 'Orphan' in level:
-                                    # Child row - save Product Group and tags
-                                    product_group = (row.get('Product Group', '') or '').strip()
-                                    parent_asin = (row.get('Parent ASIN', '') or '').strip()
-                                    
-                                    tag_1 = (row.get('Tag 1', '') or '').strip()
-                                    tag_2 = (row.get('Tag 2', '') or '').strip()
-                                    tag_3 = (row.get('Tag 3', '') or '').strip()
-                                    
+                                # Propagate Parent Product Group to all children
+                                for parent_asin, parent_pg in parent_updates.items():
+                                    for child_asin, child_info in st.session_state.client_config['branded_asins_data'].items():
+                                        if (child_info.get('parent_asin', '') or '').strip() == parent_asin:
+                                            child_info['parent_product_group'] = parent_pg
+                                
+                                save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                # Clear both editor widget states to force refresh
+                                if 'branded_asins_editor' in st.session_state:
+                                    del st.session_state['branded_asins_editor']
+                                if 'branded_asins_editor_hierarchy' in st.session_state:
+                                    del st.session_state['branded_asins_editor_hierarchy']
+                                if 'last_asin_filter_key' in st.session_state:
+                                    del st.session_state.last_asin_filter_key
+                                st.success("Branded ASINs updated.")
+                                st.rerun()
+
+                            else:
+                                # Handle flat view save (original logic)
+                                for _, row in edited_asins_df.iterrows():
+                                    asin = row['ASIN']
+                                    product_group = row['Product Group']
+                                    sku = row.get('SKU', '')  # Get SKU value
                                     if asin in st.session_state.client_config['branded_asins_data']:
                                         st.session_state.client_config['branded_asins_data'][asin]['product_group'] = product_group
-                                        st.session_state.client_config['branded_asins_data'][asin]['tag_1'] = tag_1
-                                        st.session_state.client_config['branded_asins_data'][asin]['tag_2'] = tag_2
-                                        st.session_state.client_config['branded_asins_data'][asin]['tag_3'] = tag_3
-                                        
-                                        # Update Parent Product Group from parent if available
-                                        if parent_asin and parent_asin in parent_updates:
-                                            st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = parent_updates[parent_asin]
-                            
-                            # Propagate Parent Product Group to all children
-                            for parent_asin, parent_pg in parent_updates.items():
-                                for child_asin, child_info in st.session_state.client_config['branded_asins_data'].items():
-                                    if (child_info.get('parent_asin', '') or '').strip() == parent_asin:
-                                        child_info['parent_product_group'] = parent_pg
-                            
-                            save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
-                            # Clear both editor widget states to force refresh
-                            if 'branded_asins_editor' in st.session_state:
-                                del st.session_state['branded_asins_editor']
-                            if 'branded_asins_editor_hierarchy' in st.session_state:
-                                del st.session_state['branded_asins_editor_hierarchy']
-                            if 'last_asin_filter_key' in st.session_state:
-                                del st.session_state.last_asin_filter_key
-                            st.success("Branded ASINs updated.")
+                                        st.session_state.client_config['branded_asins_data'][asin]['sku'] = sku  # Save SKU
+                                        # Save Parent ASIN (read-only from sales report, but preserve if it exists)
+                                        if 'Parent ASIN' in row and row['Parent ASIN']:
+                                            st.session_state.client_config['branded_asins_data'][asin]['parent_asin'] = row['Parent ASIN']
+                                        # Save Parent Product Group (user editable)
+                                        if 'Parent Product Group' in row:
+                                            st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = row.get('Parent Product Group', '')
+                                        # Save Tag 1/2/3
+                                        st.session_state.client_config['branded_asins_data'][asin]['tag1'] = row.get('Tag 1', '')
+                                        st.session_state.client_config['branded_asins_data'][asin]['tag2'] = row.get('Tag 2', '')
+                                        st.session_state.client_config['branded_asins_data'][asin]['tag3'] = row.get('Tag 3', '')
+                                save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                # Clear the data_editor widget state to force refresh
+                                if 'branded_asins_editor' in st.session_state:
+                                    del st.session_state['branded_asins_editor']
+                                if 'last_asin_filter_key' in st.session_state:
+                                    del st.session_state.last_asin_filter_key
+                                st.success("Branded ASINs updated.")
+                                st.rerun()
+                    with col_delete_sel:
+                        if st.button("Delete Selected Rows", key="delete_branded_asins_btn"):
+                            rows_to_delete = edited_asins_df[edited_asins_df['Delete'] == True]
+                            if not rows_to_delete.empty:
+                                for _, row in rows_to_delete.iterrows():
+                                    asin = row['ASIN']
+                                    if asin in st.session_state.client_config['branded_asins_data']:
+                                        del st.session_state.client_config['branded_asins_data'][asin]
+                                save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                st.success(f"{len(rows_to_delete)} ASINs deleted successfully.")
+                                st.rerun()
+                            else:
+                                st.info("No rows selected for deletion.")
+                    with col_remove:
+                        if st.button("Remove Rows (Custom)", key="remove_all_asins_btn", help="Open options to remove or clear ASIN rows"):
+                            st.session_state.show_remove_asins_dialog = True
                             st.rerun()
-                        
-                        else:
-                            # Handle flat view save (original logic)
-                            for _, row in edited_asins_df.iterrows():
-                                asin = row['ASIN']
-                                product_group = row['Product Group']
-                                sku = row.get('SKU', '')  # Get SKU value
-                                if asin in st.session_state.client_config['branded_asins_data']:
-                                    st.session_state.client_config['branded_asins_data'][asin]['product_group'] = product_group
-                                    st.session_state.client_config['branded_asins_data'][asin]['sku'] = sku  # Save SKU
-                                    # Save Parent ASIN (read-only from sales report, but preserve if it exists)
-                                    if 'Parent ASIN' in row and row['Parent ASIN']:
-                                        st.session_state.client_config['branded_asins_data'][asin]['parent_asin'] = row['Parent ASIN']
-                                    # Save Parent Product Group (user editable)
-                                    if 'Parent Product Group' in row:
-                                        st.session_state.client_config['branded_asins_data'][asin]['parent_product_group'] = row.get('Parent Product Group', '')
-                                    # Save Tag 1/2/3
-                                    st.session_state.client_config['branded_asins_data'][asin]['tag1'] = row.get('Tag 1', '')
-                                    st.session_state.client_config['branded_asins_data'][asin]['tag2'] = row.get('Tag 2', '')
-                                    st.session_state.client_config['branded_asins_data'][asin]['tag3'] = row.get('Tag 3', '')
-                            save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
-                            # Clear the data_editor widget state to force refresh
-                            if 'branded_asins_editor' in st.session_state:
-                                del st.session_state['branded_asins_editor']
-                            if 'last_asin_filter_key' in st.session_state:
-                                del st.session_state.last_asin_filter_key
-                            st.success("Branded ASINs updated.")
+                    with col_select_all:
+                        if st.button("Select All Rows", key="select_all_asin_rows"):
+                            st.session_state.asin_select_all = True
                             st.rerun()
-                with col_delete_sel:
-                    if st.button("Delete Selected Rows", key="delete_branded_asins_btn"):
-                        rows_to_delete = edited_asins_df[edited_asins_df['Delete'] == True]
-                        if not rows_to_delete.empty:
-                            for _, row in rows_to_delete.iterrows():
-                                asin = row['ASIN']
-                                if asin in st.session_state.client_config['branded_asins_data']:
-                                    del st.session_state.client_config['branded_asins_data'][asin]
-                            save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
-                            st.success(f"{len(rows_to_delete)} ASINs deleted successfully.")
-                            st.rerun()
-                        else:
-                            st.info("No rows selected for deletion.")
-                with col_remove:
-                    if st.button("Remove Rows (Custom)", key="remove_all_asins_btn", help="Open options to remove or clear ASIN rows"):
-                        st.session_state.show_remove_asins_dialog = True
-                        st.rerun()
-                with col_select_all:
-                    if st.button("Select All Rows", key="select_all_asin_rows"):
-                        st.session_state.asin_select_all = True
-                        st.rerun()
-                
-                # Show confirmation dialog if triggered
-                if st.session_state.get('show_remove_asins_dialog', False):
-                    st.markdown("---")
-                    st.markdown("""<div style='padding: 15px; background-color: rgba(255, 193, 7, 0.1); border: 2px solid #ffc107; border-radius: 8px; margin: 10px 0;'>
-                        <h4 style='margin: 0 0 10px 0; color: #856404;'>⚠️ Remove All Branded ASIN Rows</h4>
-                        <p style='margin: 0; color: #856404;'>This will remove all ASIN rows. Are you sure?</p>
-                    </div>""", unsafe_allow_html=True)
-                    confirm_col1, confirm_col2 = st.columns(2)
-                    with confirm_col1:
-                        if st.button("🗑️ Delete All Rows", key="confirm_delete_all_asins"):
-                            st.session_state.client_config['branded_asins_data'] = {}
-                            save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
-                            st.session_state.show_remove_asins_dialog = False
-                            st.success("All branded ASIN rows removed.")
-                            st.rerun()
-                    with confirm_col2:
-                        if st.button("Cancel", key="cancel_delete_all_asins"):
-                            st.session_state.show_remove_asins_dialog = False
-                            st.rerun()
+                    
+                    # Show confirmation dialog if triggered
+                    if st.session_state.get('show_remove_asins_dialog', False):
+                        st.markdown("---")
+                        st.markdown("""<div style='padding: 15px; background-color: rgba(255, 193, 7, 0.1); border: 2px solid #ffc107; border-radius: 8px; margin: 10px 0;'>
+                            <h4 style='margin: 0 0 10px 0; color: #856404;'>⚠️ Remove All Branded ASIN Rows</h4>
+                            <p style='margin: 0; color: #856404;'>This will remove all ASIN rows. Are you sure?</p>
+                        </div>""", unsafe_allow_html=True)
+                        confirm_col1, confirm_col2 = st.columns(2)
+                        with confirm_col1:
+                            if st.button("🗑️ Delete All Rows", key="confirm_delete_all_asins"):
+                                st.session_state.client_config['branded_asins_data'] = {}
+                                save_client_config(st.session_state.selected_client_name, st.session_state.client_config)
+                                st.session_state.show_remove_asins_dialog = False
+                                st.success("All branded ASIN rows removed.")
+                                st.rerun()
+                        with confirm_col2:
+                            if st.button("Cancel", key="cancel_delete_all_asins"):
+                                st.session_state.show_remove_asins_dialog = False
+                                st.rerun()
                 
                 # Debug information for product groups
                 st.markdown("---")
@@ -19819,6 +20314,151 @@ if st.session_state.client_config:
         # Professional header with title and logo
         client_name = st.session_state.client_config.get('client_name', 'Client') if st.session_state.get('client_config') else 'Client'
         
+        # CSS for Sticky Navigation and Responsive Layout
+        st.markdown("""
+            <style>
+            /* Target the specific element container in the vertical block */
+            div[data-testid="stVerticalBlock"] > div:has(.audit-nav-bar) {
+                position: sticky;
+                top: 3rem;
+                z-index: 1;
+                display: inline-block;
+                background-color: #1E1E1E !important;
+            }
+            
+            .audit-nav-bar {
+                padding: 10px 0px;
+                border-bottom: 1px solid #262730;
+                width: auto;
+                display: inline-flex;
+                justify-content: flex-start;
+                background-color: #1E1E1E !important;
+            }
+
+            .nav-dropdown {
+                position: relative;
+                display: inline-block;
+                font-family: "Source Sans Pro", sans-serif;
+            }
+
+            .nav-dropbtn {
+                background-color: #262730;
+                color: white;
+                padding: 8px 16px;
+                font-size: 14px;
+                border: 1px solid #4a4a4a;
+                border-radius: 4px;
+                cursor: pointer;
+                min-width: 220px;
+                text-align: left;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-weight: 500;
+                transition: background-color 0.2s;
+            }
+            
+            .nav-dropbtn:hover {
+                background-color: #363636;
+                border-color: #606060;
+            }
+
+            .nav-dropdown-content {
+                display: none;
+                position: absolute;
+                background-color: #262730;
+                min-width: 220px;
+                box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.3);
+                z-index: 1000;
+                border: 1px solid #4a4a4a;
+                border-radius: 4px;
+                top: 100%;
+                margin-top: 0;
+                max-height: 60vh;
+                overflow-y: auto;
+            }
+            
+            .nav-dropdown:hover .nav-dropdown-content {
+                display: block;
+            }
+            
+            .nav-dropdown-content a {
+                color: #e0e0e0;
+                padding: 10px 16px;
+                text-decoration: none;
+                display: block;
+                font-size: 14px;
+                border-bottom: 1px solid #333;
+                transition: background-color 0.1s;
+            }
+            
+            .nav-dropdown-content a:last-child {
+                border-bottom: none;
+            }
+
+            .nav-dropdown-content a:hover {
+                background-color: #3da9fc;
+                color: white;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        # Top-of-page navigation for Advertising Audit sections (sitelink-style navbar)
+        show_product_groups_link = False
+        show_placements_link = False
+
+        # Check if Product Groups should be shown
+        if (st.session_state.get('client_config') and 
+            'branded_asins_data' in st.session_state.client_config):
+            has_product_groups = any(
+                'product_group' in asin_info and str(asin_info['product_group']).strip()
+                for asin_info in st.session_state.client_config['branded_asins_data'].values()
+            )
+            if has_product_groups and 'asin_perf_df' in st.session_state and st.session_state.asin_perf_df is not None and 'Product Group' in st.session_state.asin_perf_df.columns:
+                show_product_groups_link = st.session_state.asin_perf_df['Product Group'].astype(str).str.strip().replace('', pd.NA).dropna().any()
+
+        # Check if Placements should be shown (not companion data)
+        show_placements_link = not st.session_state.get('is_companion_data', False)
+
+        nav_section_options = {
+            "Overview": "account-overview",
+            "Branded vs. Non-Branded": "branded-vs-non-branded-performance",
+            "Targeting": "targeting-performance",
+            "Search Terms": "search-term-performance",
+            "Wasted Spend": "wasted-spend",
+            "Contradicting Targets": "contradicting-targets",
+            "ACoS Distribution": "acos-range-spend-distribution",
+            "Tactic Performance": "performance-by-tactic-ad-type-match-type",
+            "Products": "product-analysis",
+        }
+
+        if show_product_groups_link:
+            nav_section_options["Product Groups"] = "performance-by-product-group"
+
+        if show_placements_link:
+            nav_section_options["Placements"] = "performance-by-placement"
+        
+        nav_section_options["Account Insights"] = "account-insights"
+
+        nav_links_html = """
+        <div class='audit-nav-bar'>
+            <div class="nav-dropdown">
+                <button class="nav-dropbtn">
+                    Jump to Section 
+                    <span style="margin-left:10px">▾</span>
+                </button>
+                <div class="nav-dropdown-content">
+        """
+        for label, anchor_id in nav_section_options.items():
+            nav_links_html += f"<a href='#{anchor_id}'>{label}</a>"
+        
+        nav_links_html += """
+                </div>
+            </div>
+        </div>
+        """
+        st.markdown(nav_links_html, unsafe_allow_html=True)
+
         # Load the logo
         logo_path = "assets/hand_logo.png"
         logo_html = ""
@@ -19839,7 +20479,7 @@ if st.session_state.client_config:
             <div class='header-divider'></div>
         """, unsafe_allow_html=True)
 
-        
+
         # Global Sales Attribution Toggle - only shown on Advertising Audit page
         is_companion = st.session_state.get('is_companion_data', False)
         st.session_state.debug_messages.append(f"Is companion data: {is_companion}")
@@ -19952,64 +20592,6 @@ if st.session_state.client_config:
                 st.session_state.debug_messages.append("No sales metrics found, defaulting to 'Total Sales'")
         
         st.divider()
-        
-        # Create dropdown navigation for Advertising Audit sections
-        # Check conditions for showing Product Groups and Placements links
-        show_product_groups_link = False
-        show_placements_link = False
-        
-        # Check if Product Groups should be shown
-        if (st.session_state.get('client_config') and 
-            'branded_asins_data' in st.session_state.client_config):
-            has_product_groups = any(
-                'product_group' in asin_info and str(asin_info['product_group']).strip()
-                for asin_info in st.session_state.client_config['branded_asins_data'].values()
-            )
-            if has_product_groups and 'asin_perf_df' in st.session_state and st.session_state.asin_perf_df is not None and 'Product Group' in st.session_state.asin_perf_df.columns:
-                show_product_groups_link = st.session_state.asin_perf_df['Product Group'].astype(str).str.strip().replace('', pd.NA).dropna().any()
-        
-        # Check if Placements should be shown (not companion data)
-        show_placements_link = not st.session_state.get('is_companion_data', False)
-        
-        # Build section options for dropdown
-        section_options = {
-            "Overview": "account-overview",
-            "Branded vs. Non-Branded": "branded-vs-non-branded-performance",
-            "Targeting": "targeting-performance",
-            "Search Terms": "search-term-performance",
-            "Contradicting Targets": "contradicting-targets",
-            "Wasted Spend": "wasted-spend",
-            "ACoS Distribution": "acos-range-spend-distribution",
-            "Tactic Performance": "performance-by-tactic-ad-type-match-type",
-            "Products": "product-analysis"
-        }
-        
-        if show_product_groups_link:
-            section_options["Product Groups"] = "performance-by-product-group"
-        
-        if show_placements_link:
-            section_options["Placements"] = "performance-by-placement"
-        
-        # Create dropdown with navigation
-        selected_section = st.selectbox(
-            "Jump to Section:",
-            options=list(section_options.keys()),
-            key="section_nav_dropdown"
-        )
-        
-        # Add JavaScript to scroll to selected section
-        if selected_section:
-            section_id = section_options[selected_section]
-            st.markdown(f"""
-                <script>
-                (function() {{
-                    const targetSection = document.getElementById('{section_id}');
-                    if (targetSection) {{
-                        targetSection.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-                    }}
-                }})();
-                </script>
-            """, unsafe_allow_html=True)
         
         # Display Account Overview directly without tabs
         
@@ -20639,14 +21221,12 @@ if st.session_state.client_config:
                             st.session_state.branded_data_source = "Targets"
                             
                         # Left-align the data source picker
-                        toggle_col, desc_col = st.columns([0.2, 0.8])
-                        with toggle_col:
-                            data_source = st.radio(
-                                "Data Source",
-                                options=["Targets", "Search Terms"],
-                                horizontal=True,
-                                key="branded_data_source"
-                            )
+                        data_source = st.radio(
+                            "Data Source",
+                            options=["Targets", "Search Terms"],
+                            horizontal=True,
+                            key="branded_data_source"
+                        )
                             
                         # No descriptions needed
                         
@@ -21930,7 +22510,7 @@ if st.session_state.client_config:
                         selected_ad_types = [at for at in ad_types if at != 'All']
                 
                 # Advanced Filters Section
-                st.markdown("---")
+                st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
                 with st.expander("🔧 Advanced Filters", expanded=False):
                     # Initialize advanced filter state
                     if 'targeting_filter_groups' not in st.session_state:
@@ -23264,22 +23844,51 @@ if st.session_state.client_config:
                             df = df.sort_values(by='Ad_Sales_Numeric', ascending=False)
                             df = df.drop(columns=['Ad_Sales_Numeric'])
 
-                        # Remove any manual string formatting for display
-                        # Column config removed - using Python-level formatting for PyInstaller compatibility
-                        shared_column_config = None
+                        # Build a display dataframe with proper numeric types for correct sorting
+                        # Use column_config for formatting to preserve numeric sorting
+                        display_df = filtered_df[display_columns].copy()
 
+                        # Convert numeric-like columns to actual numeric types (keeps sorting working)
+                        for col in display_df.columns:
+                            if col in ['Campaign', 'Product Group', 'Product', 'Target Type', 'Match Type', 'Target', 'Search Term']:
+                                # Text columns - no conversion needed
+                                continue
 
+                            # Convert to numeric, stripping any existing symbols/commas
+                            display_df[col] = pd.to_numeric(
+                                display_df[col]
+                                .astype(str)
+                                .str.replace('$', '', regex=False)
+                                .str.replace('%', '', regex=False)
+                                .str.replace(',', '', regex=False),
+                                errors='coerce',
+                            ).fillna(0)
 
-                        # Use style_acos for consistent Python-level formatting (compatible with PyInstaller)
-                        if 'ACoS' in filtered_df.columns and (target_acos is not None or use_avg_fallback):
-                            try:
-                                style_acos(filtered_df[display_columns], target_acos, column_config=None, use_avg_as_fallback=use_avg_fallback, title=f"{'Branded' if is_branded else 'Non-Branded' if is_branded is not None else 'All'} Search Terms")
-                            except Exception as e:
-                                # Fallback to style_acos without title
-                                style_acos(filtered_df[display_columns], target_acos, column_config=None, use_avg_as_fallback=False, title=None, use_expander=False)
-                        else:
-                            # Use style_acos for consistent formatting
-                            style_acos(filtered_df[display_columns], target_acos, column_config=None, use_avg_as_fallback=False, title=None, use_expander=False)
+                        # Build format dictionary for .style.format() (same approach as Target Performance table)
+                        fmt_dict = {}
+                        for col in display_df.columns:
+                            if col in ['Campaign', 'Product Group', 'Product', 'Target Type', 'Match Type', 'Target', 'Search Term']:
+                                continue  # Text columns
+                            elif col == 'ROAS':
+                                fmt_dict[col] = lambda x: f"{x:.2f}" if pd.notnull(x) else "0.00"
+                            elif col in ['ACoS', 'CVR', 'CTR']:
+                                fmt_dict[col] = lambda x: f"{x:.2f}%" if pd.notnull(x) else "0.00%"
+                            elif col in ['CPC', 'AOV']:
+                                fmt_dict[col] = lambda x: f"${x:.2f}" if pd.notnull(x) else "$0.00"
+                            elif col in ['Spend', 'Ad Sales']:
+                                fmt_dict[col] = lambda x: f"${x:,.2f}" if pd.notnull(x) else "$0.00"
+                            elif col in ['Impressions', 'Clicks', 'Orders']:
+                                fmt_dict[col] = lambda x: f"{int(x):,}" if pd.notnull(x) else "0"
+
+                        # Apply formatting using .style.format()
+                        styled_df = display_df.style.format(fmt_dict)
+
+                        # Display the styled dataframe (preserves numeric sorting)
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
 
                         # --- Export: Search Term Performance (Filtered) -> Excel ---
                         try:
@@ -24110,6 +24719,20 @@ if st.session_state.client_config:
                                     
                                     # Apply formatting using .style.format()
                                     styled_df = display_df.style.format(fmt_dict)
+
+                                    # Apply conditional coloring to Priority column
+                                    if 'Priority' in display_df.columns:
+                                        def _priority_style(val):
+                                            if val == 'Critical':
+                                                return 'background-color: #C53030; color: #FFFFFF; font-weight: 600; border-radius: 12px; padding: 2px 6px; text-align: center;'
+                                            elif val == 'High':
+                                                return 'background-color: #DD6B20; color: #FFFFFF; font-weight: 600; border-radius: 12px; padding: 2px 6px; text-align: center;'
+                                            elif val == 'Medium':
+                                                return 'background-color: #D69E2E; color: #1A202C; font-weight: 600; border-radius: 12px; padding: 2px 6px; text-align: center;'
+                                            elif val == 'Low':
+                                                return 'background-color: #2F855A; color: #E6FFFA; font-weight: 600; border-radius: 12px; padding: 2px 6px; text-align: center;'
+                                            return ''
+                                        styled_df = styled_df.applymap(_priority_style, subset=['Priority'])
                                     
                                     # Display the styled dataframe
                                     st.dataframe(
@@ -29934,9 +30557,9 @@ if st.session_state.current_page == "advertising_audit":
                                 'Product Group': (v or {}).get('product_group', '') or 'Untagged Group',
                                 'Product Title': (v or {}).get('product_title', ''),
                                 'SKU': (v or {}).get('sku', ''),
-                                'Tag 1': (v or {}).get('tag_1', ''),
-                                'Tag 2': (v or {}).get('tag_2', ''),
-                                'Tag 3': (v or {}).get('tag_3', '')
+                                'Tag 1': (v or {}).get('tag1', ''),
+                                'Tag 2': (v or {}).get('tag2', ''),
+                                'Tag 3': (v or {}).get('tag3', '')
                             }
                             for k, v in _branded_json.items()
                         ])
@@ -30122,19 +30745,23 @@ if st.session_state.current_page == "advertising_audit":
                     if len(asin_to_sku_mapping) > 0:
                         sample_mappings = list(asin_to_sku_mapping.items())[:3]
                         st.write(f"Debug: Sample mappings: {sample_mappings}")
-                
+
+                # Cohesive Filters section wrapper
+                st.markdown("**Filters**")
+                st.markdown("<div style='margin-bottom:0.35rem;'></div>", unsafe_allow_html=True)
+
                 # --- SKU Column Option ---
                 show_sku_column = False
                 if asin_to_sku_mapping:  # Only show option if we have SKU data
-                    st.markdown("**Display Options**")
+                    st.caption("Display Options")
                     show_sku_column = st.checkbox(
                         "Include SKU column (Seller Central)", 
                         value=False, 
                         key="show_sku_column",
                         help="Show SKU column with data from Seller Central bulk file"
                     )
-                    st.markdown("---")
-                
+                    st.markdown("<div style='margin-bottom:0.35rem;'></div>", unsafe_allow_html=True)
+
                 # --- Basic Filters ---
                 if show_sku_column:
                     col1, col2, col3, col4 = st.columns(4)
@@ -30201,7 +30828,7 @@ if st.session_state.current_page == "advertising_audit":
                 available_tags = {}
                 if st.session_state.client_config and 'branded_asins_data' in st.session_state.client_config:
                     for tag_num in [1, 2, 3]:
-                        tag_key = f'tag_{tag_num}'
+                        tag_key = f'tag{tag_num}'
                         tag_col = f'Tag {tag_num}'
                         tag_values = set()
                         for asin_info in st.session_state.client_config['branded_asins_data'].values():
@@ -30213,7 +30840,7 @@ if st.session_state.current_page == "advertising_audit":
                 
                 # Render tag filters if any tags have data
                 if available_tags:
-                    st.markdown("---")
+                    st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
                     num_tag_filters = len(available_tags)
                     tag_cols = st.columns(num_tag_filters)
                     
@@ -30229,8 +30856,8 @@ if st.session_state.current_page == "advertising_audit":
                 else:
                     tag_filters = {}
                 
-                # Advanced Filters Section
-                st.markdown("---")
+                # Advanced Filters Section (no divider, just a bit of spacing)
+                st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
                 with st.expander("🔧 Advanced Filters", expanded=False):
                     # Initialize advanced filter state
                     if 'asin_filter_groups' not in st.session_state:
@@ -30430,6 +31057,9 @@ if st.session_state.current_page == "advertising_audit":
                     "Only rows where % of Total Sales > % of Spend",
                     key="asin_sales_gt_spend"
                 )
+
+                # Small extra padding before the Performance by ASIN header
+                st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
 
                 # Create a row with a subtle help icon and tooltip for the header
                 col1, col2 = st.columns([0.98, 0.02])
@@ -30708,12 +31338,12 @@ if st.session_state.current_page == "advertising_audit":
                         desired_after_aov = ['Clicks', 'Sessions', 'Ad Traffic % of Total', 'Ad Sales % of Total']
                         if 'AOV' in display_df.columns:
                             cols = list(display_df.columns)
-                            # Remove duplicates of desired columns first
+                            # Remove desired columns from their current positions
                             cols = [c for c in cols if c not in desired_after_aov]
                             insert_idx = cols.index('AOV') + 1
                             for i, c in enumerate(desired_after_aov):
-                                if c in display_df.columns or c in desired_after_aov:  # ensure presence check
-                                    # Only insert if exists now (it will exist due to prior creation)
+                                # Only insert if the column actually exists in the dataframe
+                                if c in display_df.columns:
                                     cols.insert(insert_idx + i, c)
                             display_df = display_df[cols]
                         # Move Impressions to far right if present
@@ -30788,8 +31418,8 @@ if st.session_state.current_page == "advertising_audit":
                     filtered_ad_sales_pct = (filtered_total_ad_sales / global_total_ad_sales * 100) if global_total_ad_sales > 0 else 0
                     filtered_total_sales_pct = (filtered_total_sales / global_total_sales * 100) if global_total_sales > 0 else 0
 
+                    # Raw totals values (by metric name)
                     totals = {
-                        'ASIN': 'Total',
                         'Spend': f"${filtered_total_spend:,.2f}",
                         'Ad Sales': f"${filtered_total_ad_sales:,.2f}",
                         'Total Sales': f"${filtered_total_sales:,.2f}",
@@ -30806,12 +31436,24 @@ if st.session_state.current_page == "advertising_audit":
                         'Ad Sales % of Total': f"{((filtered_total_ad_sales/filtered_total_sales)*100) if filtered_total_sales>0 else 0:.2f}%",
                         'Ad Traffic % of Total': f"{((filtered_total_clicks/filtered_total_sessions)*100) if filtered_total_sessions>0 else 0:.2f}%"
                     }
-                    
-                    # SKU column is not included in totals row (only in data table)
-                
-                
-                    # Create the total row as a separate DataFrame
-                    total_row = pd.DataFrame([totals])
+
+                    # Determine metric column order from the main table, starting at Spend
+                    metric_order = [
+                        col for col in display_df.columns
+                        if col in totals.keys()
+                    ]
+
+                    # ASIN and SKU are intentionally excluded from totals (only metrics are shown)
+
+                    # Create the total row as a separate DataFrame, respecting the main table's column order
+                    if metric_order:
+                        total_row = pd.DataFrame(
+                            [[totals[col] for col in metric_order]],
+                            columns=metric_order
+                        )
+                    else:
+                        # Fallback to default dict order if something unexpected happens
+                        total_row = pd.DataFrame([totals])
                 
                     # Display the totals row in a separate table with ACoS conditional formatting
                     account_wide_acos = None
@@ -30822,24 +31464,42 @@ if st.session_state.current_page == "advertising_audit":
 
                     # Using global color gradient functions defined at the top of the file
 
-                    # Create a dictionary for formatting
+                    # Create a dictionary for formatting with safe handlers for NaN/None values
+                    def safe_money(x):
+                        try:
+                            return f"${float(x):,.2f}" if pd.notna(x) else "$0.00"
+                        except (ValueError, TypeError):
+                            return "$0.00"
+                    
+                    def safe_pct(x):
+                        try:
+                            return f"{float(x):.2f}%" if pd.notna(x) else "0.00%"
+                        except (ValueError, TypeError):
+                            return "0.00%"
+                    
+                    def safe_int(x):
+                        try:
+                            return f"{int(float(x)):,}" if pd.notna(x) else "0"
+                        except (ValueError, TypeError):
+                            return "0"
+                    
                     fmt_dict = {
-                        'Spend': lambda x: f"${x:,.2f}",
-                        'Ad Sales': lambda x: f"${x:,.2f}",
-                        'Total Sales': lambda x: f"${x:,.2f}",
-                        'AOV': lambda x: f"${x:,.2f}",
-                        'CPC': lambda x: f"${x:,.2f}",
-                        '% of Spend': lambda x: f"{x:.2f}%",
-                        '% of Ad Sales': lambda x: f"{x:.2f}%",
-                        '% of Total Sales': lambda x: f"{x:.2f}%",
-                        'ACoS': lambda x: f"{x:.2f}%",
-                        'TACoS': lambda x: f"{x:.2f}%",
-                        'CVR': lambda x: f"{x:.2f}%",
-                        'Ad Sales % of Total': lambda x: f"{x:.2f}%",
-                        'Ad Traffic % of Total': lambda x: f"{x:.2f}%",
-                        'Clicks': lambda x: f"{int(x):,}",
-                        'Sessions': lambda x: f"{int(x):,}",
-                        'Impressions': lambda x: f"{int(x):,}"
+                        'Spend': safe_money,
+                        'Ad Sales': safe_money,
+                        'Total Sales': safe_money,
+                        'AOV': safe_money,
+                        'CPC': safe_money,
+                        '% of Spend': safe_pct,
+                        '% of Ad Sales': safe_pct,
+                        '% of Total Sales': safe_pct,
+                        'ACoS': safe_pct,
+                        'TACoS': safe_pct,
+                        'CVR': safe_pct,
+                        'Ad Sales % of Total': safe_pct,
+                        'Ad Traffic % of Total': safe_pct,
+                        'Clicks': safe_int,
+                        'Sessions': safe_int,
+                        'Impressions': safe_int
                     }
                 
                     # Convert string-formatted values back to numeric for proper sorting
@@ -30945,25 +31605,33 @@ if st.session_state.current_page == "advertising_audit":
                     paged_cells = len(paged_df) * len(paged_df.columns)
                     
                     if paged_cells <= max_cells_for_styling and len(paged_df) > 0:
-                        # Apply styling for small datasets (use the current page slice)
-                        styled_df = paged_df.style.format(fmt_dict)
-                        
-                        # Apply color gradients
-                        if '% of Spend' in paged_df.columns:
-                            styled_df = styled_df.apply(lambda x: [color_gradient_blue(v, 0, 100, scale_max=40) 
-                                                                if not pd.isna(v) else '' 
-                                                                for v in x] if x.name == '% of Spend' else [''] * len(x), axis=0)
-                        if '% of Ad Sales' in paged_df.columns:
-                            styled_df = styled_df.apply(lambda x: [color_gradient_green(v, 0, 100, scale_max=40) 
-                                                                if not pd.isna(v) else '' 
-                                                                for v in x] if x.name == '% of Ad Sales' else [''] * len(x), axis=0)
-                        if '% of Total Sales' in paged_df.columns:
-                            styled_df = styled_df.apply(lambda x: [color_gradient_green(v, 0, 100, scale_max=40) 
-                                                                if not pd.isna(v) else '' 
-                                                                for v in x] if x.name == '% of Total Sales' else [''] * len(x), axis=0)
-                        
-                        # Display styled dataframe
-                        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                        try:
+                            # Apply styling for small datasets (use the current page slice)
+                            # Only format columns that exist in the dataframe
+                            active_fmt_dict = {k: v for k, v in fmt_dict.items() if k in paged_df.columns}
+                            styled_df = paged_df.style.format(active_fmt_dict)
+                            
+                            # Apply color gradients
+                            if '% of Spend' in paged_df.columns:
+                                styled_df = styled_df.apply(lambda x: [color_gradient_blue(v, 0, 100, scale_max=40) 
+                                                                    if not pd.isna(v) else '' 
+                                                                    for v in x] if x.name == '% of Spend' else [''] * len(x), axis=0)
+                            if '% of Ad Sales' in paged_df.columns:
+                                styled_df = styled_df.apply(lambda x: [color_gradient_green(v, 0, 100, scale_max=40) 
+                                                                    if not pd.isna(v) else '' 
+                                                                    for v in x] if x.name == '% of Ad Sales' else [''] * len(x), axis=0)
+                            if '% of Total Sales' in paged_df.columns:
+                                styled_df = styled_df.apply(lambda x: [color_gradient_green(v, 0, 100, scale_max=40) 
+                                                                    if not pd.isna(v) else '' 
+                                                                    for v in x] if x.name == '% of Total Sales' else [''] * len(x), axis=0)
+                            
+                            # Display styled dataframe
+                            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                        except Exception as style_error:
+                            # Fallback to unstyled display if styling fails
+                            if 'debug_messages' in st.session_state:
+                                st.session_state.debug_messages.append(f"[Product Analysis] Styling error: {style_error}")
+                            st.dataframe(paged_df, use_container_width=True, hide_index=True)
                         
                     else:
                         # Too large even for current page - show unstyled with formatting
@@ -30971,19 +31639,19 @@ if st.session_state.current_page == "advertising_audit":
                             # Format the dataframe manually without styling
                             display_df_formatted = paged_df.copy()
                             
-                            # Apply formatting without styling
+                            # Apply formatting without styling using safe formatters
                             for col in ['Spend', 'Ad Sales', 'Total Sales', 'AOV', 'CPC']:
                                 if col in display_df_formatted.columns:
-                                    display_df_formatted[col] = display_df_formatted[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                                    display_df_formatted[col] = display_df_formatted[col].apply(safe_money)
                             
                             for col in ['% of Spend', '% of Ad Sales', '% of Total Sales', 'ACoS', 'TACoS', 'CVR', 'Ad Sales % of Total', 'Ad Traffic % of Total']:
                                 if col in display_df_formatted.columns:
-                                    display_df_formatted[col] = display_df_formatted[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "0.00%")
+                                    display_df_formatted[col] = display_df_formatted[col].apply(safe_pct)
                             
                             # Format Clicks, Sessions, Impressions as integers with commas
                             for col in ['Clicks', 'Sessions', 'Impressions']:
                                 if col in display_df_formatted.columns:
-                                    display_df_formatted[col] = display_df_formatted[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else '0')
+                                    display_df_formatted[col] = display_df_formatted[col].apply(safe_int)
                             
                             # Move Impressions and Tag columns to far right
                             tag_cols = [c for c in display_df_formatted.columns if c in ['Tag 1', 'Tag 2', 'Tag 3']]
@@ -31007,14 +31675,14 @@ if st.session_state.current_page == "advertising_audit":
                             download_df = numeric_df.copy()
                             for col in ['Spend', 'Ad Sales', 'Total Sales', 'AOV', 'CPC']:
                                 if col in download_df.columns:
-                                    download_df[col] = download_df[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                                    download_df[col] = download_df[col].apply(safe_money)
                             for col in ['% of Spend', '% of Ad Sales', '% of Total Sales', 'ACoS', 'TACoS', 'CVR', 'Ad Sales % of Total', 'Ad Traffic % of Total']:
                                 if col in download_df.columns:
-                                    download_df[col] = download_df[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "0.00%")
+                                    download_df[col] = download_df[col].apply(safe_pct)
                             # Integer formatting for counts
                             for col in ['Clicks', 'Sessions', 'Impressions']:
                                 if col in download_df.columns:
-                                    download_df[col] = download_df[col].apply(lambda x: f"{int(num):,}" if pd.notna(num := pd.to_numeric(x, errors='coerce')) else '0')
+                                    download_df[col] = download_df[col].apply(safe_int)
                             # Move Impressions to far right if present
                             if 'Impressions' in download_df.columns:
                                 cols = [c for c in download_df.columns if c != 'Impressions'] + ['Impressions']
@@ -31183,10 +31851,10 @@ if st.session_state.current_page == "advertising_audit":
                                 csv_data = numeric_df.copy()
                                 for col in ['Spend', 'Ad Sales', 'Total Sales', 'AOV', 'CPC']:
                                     if col in csv_data.columns:
-                                        csv_data[col] = csv_data[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+                                        csv_data[col] = csv_data[col].apply(safe_money)
                                 for col in ['% of Spend', '% of Ad Sales', '% of Total Sales', 'ACoS', 'TACoS', 'CVR', 'Ad Sales % of Total', 'Ad Traffic % of Total']:
                                     if col in csv_data.columns:
-                                        csv_data[col] = csv_data[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "0.00%")
+                                        csv_data[col] = csv_data[col].apply(safe_pct)
                                 
                                 csv = csv_data.to_csv(index=False)
                                 st.download_button(
@@ -31197,12 +31865,198 @@ if st.session_state.current_page == "advertising_audit":
                                 )
 
                     # Add extra spacing above the ASIN Allocation Chart
+                    
+                    # --- Pre-calculate Parent ASIN Data for use in both charts ---
+                    # Check if Parent ASIN data exists in the sales report
+                    has_parent_asin_data = False
+                    parent_asin_relationships = {}
+                    parent_asin_df = pd.DataFrame()
+                    
+                    if isinstance(sales_df, pd.DataFrame) and 'Parent ASIN' in sales_df.columns:
+                        # Filter out empty/null Parent ASIN values
+                        parent_asin_data = sales_df[sales_df['Parent ASIN'].notna() & 
+                                                  (sales_df['Parent ASIN'].astype(str).str.strip() != '') &
+                                                  (sales_df['Parent ASIN'].astype(str).str.strip() != 'nan')].copy()
+                        
+                        if not parent_asin_data.empty:
+                            has_parent_asin_data = True
+                            
+                            # Build parent-child relationships
+                            for _, row in parent_asin_data.iterrows():
+                                parent_asin = str(row['Parent ASIN']).strip()
+                                child_asin = str(row['ASIN']).strip()
+                                
+                                if parent_asin not in parent_asin_relationships:
+                                    parent_asin_relationships[parent_asin] = {
+                                        'children': [],
+                                        'parent_title': parent_asin  # Default to ASIN if no title
+                                    }
+                                
+                                parent_asin_relationships[parent_asin]['children'].append({
+                                    'asin': child_asin,
+                                    'title': str(row.get('Title', child_asin))
+                                })
+                    
+                    # Create Parent ASIN performance data if we have relationships
+                    if has_parent_asin_data and len(filtered_df) > 0:
+                        parent_asin_table_data = []
+                        
+                        for parent_asin, relationship_data in parent_asin_relationships.items():
+                            # Initialize parent ASIN record
+                            parent_summary = {
+                                'Type': 'Parent',
+                                'ASIN': parent_asin,
+                                'Parent ASIN': parent_asin,
+                                'Product Group': '',
+                                'Parent Campaign Group': '',
+                                'Campaign Group': '',
+                                'Product Title': relationship_data['parent_title'],
+                                'Child Count': len(relationship_data['children']),
+                                'Spend': 0, 'Ad Sales': 0, 'Total Sales': 0,
+                                'Clicks': 0, 'Sessions': 0, 'Orders': 0,
+                                'ACoS': 0, 'TACoS': 0,
+                                '% of Spend': 0, '% of Ad Sales': 0, '% of Total Sales': 0
+                            }
+                            
+                            child_records = []
+                            for child_info in relationship_data['children']:
+                                child_asin = child_info['asin']
+                                child_title = child_info['title']
+                                
+                                # Find this child ASIN in the filtered performance data
+                                child_perf = filtered_df[filtered_df['ASIN'] == child_asin]
+                                
+                                if not child_perf.empty:
+                                    child_data = child_perf.iloc[0]
+                                    
+                                    # Add to parent totals
+                                    parent_summary['Spend'] += child_data.get('Spend', 0)
+                                    parent_summary['Ad Sales'] += child_data.get('Ad Sales', 0)
+                                    parent_summary['Total Sales'] += child_data.get('Total Sales', 0)
+                                    parent_summary['Clicks'] += child_data.get('Clicks', 0)
+                                    parent_summary['Sessions'] += child_data.get('Sessions', 0)
+                                    parent_summary['Orders'] += child_data.get('Orders', 0)
+                                    
+                                    # Get product group for this child ASIN
+                                    child_product_group = 'Untagged Group'
+                                    child_parent_campaign_group = ''
+                                    if (st.session_state.client_config and 
+                                        'branded_asins_data' in st.session_state.client_config and 
+                                        child_asin in st.session_state.client_config['branded_asins_data']):
+                                        asin_info = st.session_state.client_config['branded_asins_data'][child_asin]
+                                        if asin_info and str(asin_info.get('product_group', '')).strip():
+                                            child_product_group = str(asin_info.get('product_group', '')).strip()
+                                        if asin_info and str(asin_info.get('parent_product_group', '')).strip():
+                                            child_parent_campaign_group = str(asin_info.get('parent_product_group', '')).strip()
+                                    
+                                    child_record = {
+                                        'Type': 'Child',
+                                        'ASIN': child_asin,
+                                        'Parent ASIN': parent_asin,
+                                        'Product Group': child_product_group,
+                                        'Parent Campaign Group': child_parent_campaign_group,
+                                        'Campaign Group': child_product_group,
+                                        'Product Title': child_title,
+                                        'Child Count': 0,
+                                        'Spend': child_data.get('Spend', 0),
+                                        'Ad Sales': child_data.get('Ad Sales', 0),
+                                        'Total Sales': child_data.get('Total Sales', 0),
+                                        'Clicks': child_data.get('Clicks', 0),
+                                        'Sessions': child_data.get('Sessions', 0),
+                                        'Orders': child_data.get('Orders', 0)
+                                    }
+                                    
+                                    # Calculate child metrics
+                                    if child_record['Ad Sales'] > 0:
+                                        child_record['ACoS'] = (child_record['Spend'] / child_record['Ad Sales'] * 100)
+                                    else: child_record['ACoS'] = 0
+                                        
+                                    if child_record['Total Sales'] > 0:
+                                        child_record['TACoS'] = (child_record['Spend'] / child_record['Total Sales'] * 100)
+                                    else: child_record['TACoS'] = 0
+                                    
+                                    if child_record['Clicks'] > 0:
+                                        child_record['CPC'] = child_record['Spend'] / child_record['Clicks']
+                                        child_record['CVR'] = (child_record['Orders'] / child_record['Clicks'] * 100)
+                                    else: child_record['CPC'] = 0; child_record['CVR'] = 0
+                                        
+                                    if child_record['Orders'] > 0:
+                                        child_record['AOV'] = child_record['Ad Sales'] / child_record['Orders']
+                                    else: child_record['AOV'] = 0
+                                    
+                                    # Ratios
+                                    try:
+                                        if child_record['Total Sales'] > 0:
+                                            child_record['Ad Sales % of Total'] = (child_record['Ad Sales'] / child_record['Total Sales']) * 100
+                                        else: child_record['Ad Sales % of Total'] = 0
+                                    except: child_record['Ad Sales % of Total'] = 0
+                                    
+                                    try:
+                                        if child_record.get('Sessions', 0) > 0:
+                                            child_record['Ad Traffic % of Total'] = (child_record.get('Clicks', 0) / child_record.get('Sessions', 0)) * 100
+                                        else: child_record['Ad Traffic % of Total'] = 0
+                                    except: child_record['Ad Traffic % of Total'] = 0
+                                    
+                                    child_records.append(child_record)
+                            
+                            # Determine parent product group
+                            child_product_groups = [record['Product Group'] for record in child_records if record['Product Group'] != 'Untagged Group']
+                            unique_groups = list(set(child_product_groups))
+                            
+                            if len(unique_groups) == 1: parent_summary['Product Group'] = unique_groups[0]
+                            elif len(unique_groups) > 1: parent_summary['Product Group'] = ''
+                            else: parent_summary['Product Group'] = 'Untagged Group'
+                            
+                            if (st.session_state.client_config and 
+                                'branded_asins_data' in st.session_state.client_config and 
+                                parent_asin in st.session_state.client_config['branded_asins_data']):
+                                parent_asin_info = st.session_state.client_config['branded_asins_data'][parent_asin]
+                                if parent_asin_info and str(parent_asin_info.get('parent_product_group', '')).strip():
+                                    parent_summary['Parent Campaign Group'] = str(parent_asin_info.get('parent_product_group', '')).strip()
+                            
+                            parent_summary['Campaign Group'] = parent_summary['Product Group']
+                            
+                            # Calculate parent metrics
+                            if parent_summary['Ad Sales'] > 0:
+                                parent_summary['ACoS'] = (parent_summary['Spend'] / parent_summary['Ad Sales'] * 100)
+                            else: parent_summary['ACoS'] = 0
+                                
+                            if parent_summary['Total Sales'] > 0:
+                                parent_summary['TACoS'] = (parent_summary['Spend'] / parent_summary['Total Sales'] * 100)
+                            else: parent_summary['TACoS'] = 0
+                            
+                            if parent_summary['Clicks'] > 0:
+                                parent_summary['CPC'] = parent_summary['Spend'] / parent_summary['Clicks']
+                                parent_summary['CVR'] = (parent_summary['Orders'] / parent_summary['Clicks'] * 100)
+                            else: parent_summary['CPC'] = 0; parent_summary['CVR'] = 0
+                                
+                            if parent_summary['Orders'] > 0:
+                                parent_summary['AOV'] = parent_summary['Ad Sales'] / parent_summary['Orders']
+                            else: parent_summary['AOV'] = 0
+                            
+                            try:
+                                if parent_summary['Total Sales'] > 0:
+                                    parent_summary['Ad Sales % of Total'] = (parent_summary['Ad Sales'] / parent_summary['Total Sales']) * 100
+                                else: parent_summary['Ad Sales % of Total'] = 0
+                            except: parent_summary['Ad Sales % of Total'] = 0
+                            
+                            try:
+                                if parent_summary.get('Sessions', 0) > 0:
+                                    parent_summary['Ad Traffic % of Total'] = (parent_summary.get('Clicks', 0) / parent_summary.get('Sessions', 0)) * 100
+                                else: parent_summary['Ad Traffic % of Total'] = 0
+                            except: parent_summary['Ad Traffic % of Total'] = 0
+                            
+                            parent_asin_table_data.append(parent_summary)
+                            parent_asin_table_data.extend(child_records)
+                            
+                        parent_asin_df = pd.DataFrame(parent_asin_table_data)
+                    
                     st.markdown("<br><br>", unsafe_allow_html=True)
                     # Create a stacked bar chart to visualize Spend, Ad Sales, and Total Sales by ASIN
                     st.markdown("##### ASIN Allocation Chart")
                 
                     # Create tabs for different visualization types
-                    asin_viz_tabs = st.tabs(["% Values", "$ Values", "Bubble Chart", "Donut Chart"])
+                    asin_viz_tabs = st.tabs(["% Values", "$ Values", "Bubble Chart", "Donut Chart", "Child Breakdown"])
                 
                     # Initialize common variables with default values
                     if 'asin_viz_sort_by' not in st.session_state:
@@ -32039,235 +32893,25 @@ if st.session_state.current_page == "advertising_audit":
                     
                         # Add some spacing after the charts
                         st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
-                
+
                     # Space for better visual separation between sections
                     st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
 
         # --- Performance by Parent ASIN Section ---
         # Check if Parent ASIN data exists in the sales report
-        has_parent_asin_data = False
-        parent_asin_relationships = {}
+        # (Logic moved to before ASIN Allocation Chart to allow shared usage)
         
-        if isinstance(sales_df, pd.DataFrame) and 'Parent ASIN' in sales_df.columns:
-            # Filter out empty/null Parent ASIN values
-            parent_asin_data = sales_df[sales_df['Parent ASIN'].notna() & 
-                                      (sales_df['Parent ASIN'].astype(str).str.strip() != '') &
-                                      (sales_df['Parent ASIN'].astype(str).str.strip() != 'nan')].copy()
-            
-            if not parent_asin_data.empty:
-                has_parent_asin_data = True
-                
-                # Build parent-child relationships
-                for _, row in parent_asin_data.iterrows():
-                    parent_asin = str(row['Parent ASIN']).strip()
-                    child_asin = str(row['ASIN']).strip()
-                    
-                    if parent_asin not in parent_asin_relationships:
-                        parent_asin_relationships[parent_asin] = {
-                            'children': [],
-                            'parent_title': parent_asin  # Default to ASIN if no title
-                        }
-                    
-                    parent_asin_relationships[parent_asin]['children'].append({
-                        'asin': child_asin,
-                        'title': str(row.get('Title', child_asin))
-                    })
-                    
-                st.session_state.debug_messages.append(f"[Parent ASIN] Found {len(parent_asin_relationships)} Parent ASINs with children")
-
+        # Ensure variables are defined (in case the calculation block above was skipped)
+        if 'has_parent_asin_data' not in locals():
+            has_parent_asin_data = False
+        if 'parent_asin_df' not in locals():
+            parent_asin_df = pd.DataFrame()
+        
         if has_parent_asin_data and len(filtered_df) > 0:
             st.markdown("##### Performance by Parent ASIN")
             
-            # Create Parent ASIN performance data for table display
-            parent_asin_table_data = []
-            
-            for parent_asin, relationship_data in parent_asin_relationships.items():
-                # Initialize parent ASIN record
-                parent_summary = {
-                    'Type': 'Parent',
-                    'ASIN': parent_asin,
-                    'Parent ASIN': parent_asin,
-                    'Product Group': '',  # Will be set based on children
-                    'Parent Campaign Group': '',  # Will be set from parent_product_group if available
-                    'Campaign Group': '',  # Will be set based on checkbox preference
-                    'Product Title': relationship_data['parent_title'],
-                    'Child Count': len(relationship_data['children']),
-                    'Spend': 0,
-                    'Ad Sales': 0,
-                    'Total Sales': 0,
-                    'Clicks': 0,
-                    'Sessions': 0,
-                    'Orders': 0,
-                    'ACoS': 0,
-                    'TACoS': 0,
-                    '% of Spend': 0,
-                    '% of Ad Sales': 0,
-                    '% of Total Sales': 0
-                }
-                
-                # Aggregate metrics from all child ASINs
-                child_records = []
-                for child_info in relationship_data['children']:
-                    child_asin = child_info['asin']
-                    child_title = child_info['title']
-                    
-                    # Find this child ASIN in the filtered performance data
-                    child_perf = filtered_df[filtered_df['ASIN'] == child_asin]
-                    
-                    if not child_perf.empty:
-                        child_data = child_perf.iloc[0]
-                        
-                        # Add to parent totals
-                        parent_summary['Spend'] += child_data.get('Spend', 0)
-                        parent_summary['Ad Sales'] += child_data.get('Ad Sales', 0)
-                        parent_summary['Total Sales'] += child_data.get('Total Sales', 0)
-                        parent_summary['Clicks'] += child_data.get('Clicks', 0)
-                        parent_summary['Sessions'] += child_data.get('Sessions', 0)
-                        parent_summary['Orders'] += child_data.get('Orders', 0)
-                        
-                        # Get product group for this child ASIN
-                        child_product_group = 'Untagged Group'  # Default
-                        child_parent_campaign_group = ''
-                        if (st.session_state.client_config and 
-                            'branded_asins_data' in st.session_state.client_config and 
-                            child_asin in st.session_state.client_config['branded_asins_data']):
-                            asin_info = st.session_state.client_config['branded_asins_data'][child_asin]
-                            if asin_info and str(asin_info.get('product_group', '')).strip():
-                                child_product_group = str(asin_info.get('product_group', '')).strip()
-                            if asin_info and str(asin_info.get('parent_product_group', '')).strip():
-                                child_parent_campaign_group = str(asin_info.get('parent_product_group', '')).strip()
-                        
-                        # Create child record
-                        child_record = {
-                            'Type': 'Child',
-                            'ASIN': child_asin,
-                            'Parent ASIN': parent_asin,
-                            'Product Group': child_product_group,
-                            'Parent Campaign Group': child_parent_campaign_group,
-                            'Campaign Group': child_product_group,  # Default to Product Group for children
-                            'Product Title': child_title,
-                            'Child Count': 0,  # Use 0 instead of empty string to fix Arrow serialization
-                            'Spend': child_data.get('Spend', 0),
-                            'Ad Sales': child_data.get('Ad Sales', 0),
-                            'Total Sales': child_data.get('Total Sales', 0),
-                            'Clicks': child_data.get('Clicks', 0),
-                            'Sessions': child_data.get('Sessions', 0),
-                            'Orders': child_data.get('Orders', 0)
-                        }
-                        
-                        # Calculate child-level metrics
-                        if child_record['Ad Sales'] > 0:
-                            child_record['ACoS'] = (child_record['Spend'] / child_record['Ad Sales'] * 100)
-                        else:
-                            child_record['ACoS'] = 0
-                            
-                        if child_record['Total Sales'] > 0:
-                            child_record['TACoS'] = (child_record['Spend'] / child_record['Total Sales'] * 100)
-                        else:
-                            child_record['TACoS'] = 0
-                        
-                        # Calculate CPC, CVR, and AOV for child
-                        if child_record['Clicks'] > 0:
-                            child_record['CPC'] = child_record['Spend'] / child_record['Clicks']
-                            child_record['CVR'] = (child_record['Orders'] / child_record['Clicks'] * 100)
-                        else:
-                            child_record['CPC'] = 0
-                            child_record['CVR'] = 0
-                            
-                        if child_record['Orders'] > 0:
-                            child_record['AOV'] = child_record['Ad Sales'] / child_record['Orders']
-                        else:
-                            child_record['AOV'] = 0
-                        
-                        # Additional child-level ratios
-                        try:
-                            if child_record['Total Sales'] > 0:
-                                child_record['Ad Sales % of Total'] = (child_record['Ad Sales'] / child_record['Total Sales']) * 100
-                            else:
-                                child_record['Ad Sales % of Total'] = 0
-                        except Exception:
-                            child_record['Ad Sales % of Total'] = 0
-                        try:
-                            if child_record.get('Sessions', 0) > 0:
-                                child_record['Ad Traffic % of Total'] = (child_record.get('Clicks', 0) / child_record.get('Sessions', 0)) * 100
-                            else:
-                                child_record['Ad Traffic % of Total'] = 0
-                        except Exception:
-                            child_record['Ad Traffic % of Total'] = 0
-                        
-                        child_records.append(child_record)
-                
-                # Determine parent product group based on children
-                child_product_groups = [record['Product Group'] for record in child_records if record['Product Group'] != 'Untagged Group']
-                unique_groups = list(set(child_product_groups))
-                
-                if len(unique_groups) == 1:
-                    # All children have the same product group
-                    parent_summary['Product Group'] = unique_groups[0]
-                elif len(unique_groups) > 1:
-                    # Children have different product groups - leave parent blank
-                    parent_summary['Product Group'] = ''
-                else:
-                    # All children are untagged
-                    parent_summary['Product Group'] = 'Untagged Group'
-                
-                # Get Parent Campaign Group from parent_product_group field
-                if (st.session_state.client_config and 
-                    'branded_asins_data' in st.session_state.client_config and 
-                    parent_asin in st.session_state.client_config['branded_asins_data']):
-                    parent_asin_info = st.session_state.client_config['branded_asins_data'][parent_asin]
-                    if parent_asin_info and str(parent_asin_info.get('parent_product_group', '')).strip():
-                        parent_summary['Parent Campaign Group'] = str(parent_asin_info.get('parent_product_group', '')).strip()
-                
-                # Set default Campaign Group to Product Group (will be updated based on checkbox)
-                parent_summary['Campaign Group'] = parent_summary['Product Group']
-                
-                # Calculate parent-level metrics
-                if parent_summary['Ad Sales'] > 0:
-                    parent_summary['ACoS'] = (parent_summary['Spend'] / parent_summary['Ad Sales'] * 100)
-                else:
-                    parent_summary['ACoS'] = 0
-                    
-                if parent_summary['Total Sales'] > 0:
-                    parent_summary['TACoS'] = (parent_summary['Spend'] / parent_summary['Total Sales'] * 100)
-                else:
-                    parent_summary['TACoS'] = 0
-                
-                # Calculate CPC, CVR, and AOV for parent
-                if parent_summary['Clicks'] > 0:
-                    parent_summary['CPC'] = parent_summary['Spend'] / parent_summary['Clicks']
-                    parent_summary['CVR'] = (parent_summary['Orders'] / parent_summary['Clicks'] * 100)
-                else:
-                    parent_summary['CPC'] = 0
-                    parent_summary['CVR'] = 0
-                    
-                if parent_summary['Orders'] > 0:
-                    parent_summary['AOV'] = parent_summary['Ad Sales'] / parent_summary['Orders']
-                else:
-                    parent_summary['AOV'] = 0
-                
-                # Parent-level additional ratios
-                try:
-                    if parent_summary['Total Sales'] > 0:
-                        parent_summary['Ad Sales % of Total'] = (parent_summary['Ad Sales'] / parent_summary['Total Sales']) * 100
-                    else:
-                        parent_summary['Ad Sales % of Total'] = 0
-                except Exception:
-                    parent_summary['Ad Sales % of Total'] = 0
-                try:
-                    if parent_summary.get('Sessions', 0) > 0:
-                        parent_summary['Ad Traffic % of Total'] = (parent_summary.get('Clicks', 0) / parent_summary.get('Sessions', 0)) * 100
-                    else:
-                        parent_summary['Ad Traffic % of Total'] = 0
-                except Exception:
-                    parent_summary['Ad Traffic % of Total'] = 0
-                
-                # Add parent record followed by its children
-                parent_asin_table_data.append(parent_summary)
-                parent_asin_table_data.extend(child_records)
-            
-            # Create DataFrame for the table
-            parent_asin_df = pd.DataFrame(parent_asin_table_data)
+            # Create DataFrame for the table (using pre-calculated df)
+            # parent_asin_df is already available from the pre-calculation block above
             
             # Check if there are any meaningful product groups defined (excluding 'Untagged Group')
             has_product_groups = False
@@ -32326,7 +32970,17 @@ if st.session_state.current_page == "advertising_audit":
                 )
             
             with col3:
-                pass
+                # Column visibility control
+                hideable_columns = ['SKU', 'Campaign Group', 'Product Title', '% of Spend', '% of Ad Sales', '% of Total Sales',
+                                   'CPC', 'CVR', 'AOV', 'Clicks', 'Sessions', 'Ad Traffic % of Total', 
+                                   'Ad Sales % of Total', 'Child Count']
+                hidden_columns = st.multiselect(
+                    "Hide columns:",
+                    options=hideable_columns,
+                    default=[],
+                    key="parent_table_hidden_columns",
+                    help="Select columns to hide from the table"
+                )
             
             # Row 2: Checkboxes
             col1, col2, col3 = st.columns(3)
@@ -32352,6 +33006,12 @@ if st.session_state.current_page == "advertising_audit":
                         help="Switch to edit mode to modify Campaign Groups (disables conditional formatting)"
                     )
             
+            # Initialize pagination state
+            if 'parent_asin_page_num' not in st.session_state:
+                st.session_state.parent_asin_page_num = 0
+            if 'parent_asin_rows_per_page' not in st.session_state:
+                st.session_state.parent_asin_rows_per_page = 100
+            
             # Use Product Group for Campaign Group
             parent_asin_df['Campaign Group'] = parent_asin_df['Product Group']
             
@@ -32371,37 +33031,90 @@ if st.session_state.current_page == "advertising_audit":
                     parent_asin_df.at[idx, '% of Total Sales'] = (row['Total Sales'] / account_total_sales * 100)
             
             # Sort the dataframe while maintaining parent-child grouping
+            # Helper function to get numeric value from potentially formatted strings
+            def get_numeric_value(val):
+                if pd.isna(val):
+                    return 0.0
+                if isinstance(val, (int, float)):
+                    return float(val)
+                # Handle string values like '$32.80' or '15.5%'
+                try:
+                    cleaned = str(val).replace('$', '').replace(',', '').replace('%', '').strip()
+                    return float(cleaned) if cleaned else 0.0
+                except:
+                    return 0.0
+            
             if sort_column == 'Parent ASIN':
-                # For Parent ASIN sorting, sort by the parent ASIN column
-                parent_asin_df_sorted = parent_asin_df.sort_values(['Parent ASIN', 'Type'], ascending=[ascending, False])
+                # For Parent ASIN sorting, sort by the parent ASIN column, then Type (Parent first)
+                parent_asin_df_sorted = parent_asin_df.sort_values(
+                    ['Parent ASIN', 'Type'], 
+                    ascending=[ascending, False],  # False for Type puts 'Parent' before 'Child'
+                    key=lambda col: col if col.name != 'Type' else col.map({'Parent': 0, 'Child': 1})
+                )
             else:
                 # For other metrics, sort parent groups by the metric, but keep children with their parents
-                parent_groups = []
+                # Create a working copy to avoid modifying the original
+                working_df = parent_asin_df.copy()
                 
-                # Group by Parent ASIN
-                for parent_asin in parent_asin_df[parent_asin_df['Type'] == 'Parent']['Parent ASIN'].unique():
-                    parent_group = parent_asin_df[parent_asin_df['Parent ASIN'] == parent_asin].copy()
+                # Create a numeric sort column for proper comparison
+                working_df['_sort_value'] = working_df[sort_column].apply(get_numeric_value)
+                
+                # Get all unique Parent ASIN values from Parent rows
+                parent_rows_df = working_df[working_df['Type'] == 'Parent'].copy()
+                parent_asins_list = parent_rows_df['Parent ASIN'].unique().tolist()
+                
+                # Build sorted groups: each group = 1 parent + its children (sorted)
+                sorted_rows = []
+                
+                # Sort parent rows by the metric first
+                parent_rows_df = parent_rows_df.sort_values('_sort_value', ascending=ascending)
+                
+                for _, parent_row in parent_rows_df.iterrows():
+                    parent_asin = parent_row['Parent ASIN']
                     
-                    # Sort children within each parent group by Total Sales (descending)
-                    parent_row = parent_group[parent_group['Type'] == 'Parent']
-                    child_rows = parent_group[parent_group['Type'] == 'Child'].sort_values('Total Sales', ascending=False)
+                    # Add the parent row first
+                    sorted_rows.append(parent_row)
                     
-                    # Recombine parent and sorted children
-                    parent_group = pd.concat([parent_row, child_rows], ignore_index=True)
-                    parent_groups.append(parent_group)
+                    # Get all children for this parent and sort by the metric
+                    child_rows = working_df[
+                        (working_df['Parent ASIN'] == parent_asin) & 
+                        (working_df['Type'] == 'Child')
+                    ].copy()
+                    
+                    if not child_rows.empty:
+                        child_rows = child_rows.sort_values('_sort_value', ascending=ascending)
+                        for _, child_row in child_rows.iterrows():
+                            sorted_rows.append(child_row)
                 
-                # Sort parent groups by the selected metric (using parent row values)
-                parent_groups.sort(
-                    key=lambda x: x[x['Type'] == 'Parent'][sort_column].iloc[0] if not x[x['Type'] == 'Parent'].empty else 0,
-                    reverse=not ascending
-                )
+                # Create the sorted dataframe
+                if sorted_rows:
+                    parent_asin_df_sorted = pd.DataFrame(sorted_rows)
+                else:
+                    parent_asin_df_sorted = working_df.copy()
                 
-                # Concatenate sorted groups
-                parent_asin_df_sorted = pd.concat(parent_groups, ignore_index=True)
+                # Clean up temporary column
+                if '_sort_value' in parent_asin_df_sorted.columns:
+                    parent_asin_df_sorted = parent_asin_df_sorted.drop(columns=['_sort_value'])
             
             # Display columns - always show detailed view
             # Use Campaign Group if we have product groups OR parent campaign groups
             show_campaign_group_column = has_product_groups or has_parent_campaign_groups
+            
+            # Check if any SKUs exist in branded_asins_data
+            has_skus = False
+            if (st.session_state.client_config and 
+                'branded_asins_data' in st.session_state.client_config):
+                for asin_info in st.session_state.client_config['branded_asins_data'].values():
+                    if asin_info.get('sku', '').strip():
+                        has_skus = True
+                        break
+            
+            # Add SKU column to sorted dataframe if SKUs exist
+            if has_skus:
+                branded_asins_data = st.session_state.client_config.get('branded_asins_data', {})
+                parent_asin_df_sorted['SKU'] = parent_asin_df_sorted['ASIN'].apply(
+                    lambda x: branded_asins_data.get(str(x).strip().upper(), {}).get('sku', '') if pd.notna(x) else ''
+                )
             
             # Determine column order based on whether we're showing only parents
             if show_only_parents:
@@ -32425,28 +33138,47 @@ if st.session_state.current_page == "advertising_audit":
                                      'Spend', 'Ad Sales', 'Total Sales', 'ACoS', 'TACoS', 'CPC', 'CVR', 'AOV',
                                      'Clicks', 'Sessions', 'Ad Traffic % of Total', 'Ad Sales % of Total', 'Child Count']
             
+            # Insert SKU column right after ASIN if SKUs exist
+            if has_skus and 'SKU' in parent_asin_df_sorted.columns:
+                asin_idx = display_columns.index('ASIN')
+                display_columns.insert(asin_idx + 1, 'SKU')
+            
+            # Remove hidden columns from display
+            if hidden_columns:
+                display_columns = [col for col in display_columns if col not in hidden_columns]
+            
             # Filter to show only parents if requested
             if show_only_parents:
                 parent_asin_df_sorted = parent_asin_df_sorted[parent_asin_df_sorted['Type'] == 'Parent'].copy()
             
             # Limit children per parent if requested (only if not showing only parents)
             if not show_only_parents and max_children != 'All':
-                filtered_groups = []
-                for parent_asin in parent_asin_df_sorted[parent_asin_df_sorted['Type'] == 'Parent']['Parent ASIN'].unique():
-                    # Get parent row
-                    parent_row = parent_asin_df_sorted[
-                        (parent_asin_df_sorted['Parent ASIN'] == parent_asin) & 
-                        (parent_asin_df_sorted['Type'] == 'Parent')
-                    ]
-                    # Get limited children (already sorted by Total Sales)
-                    child_rows = parent_asin_df_sorted[
-                        (parent_asin_df_sorted['Parent ASIN'] == parent_asin) & 
-                        (parent_asin_df_sorted['Type'] == 'Child')
-                    ].head(max_children)
-                    # Combine and add to list
-                    filtered_groups.append(pd.concat([parent_row, child_rows]))
+                filtered_rows = []
+                # Get parent ASINs in their current sorted order (preserving order, not using unique())
+                parent_rows_in_order = parent_asin_df_sorted[parent_asin_df_sorted['Type'] == 'Parent']
+                seen_parents = set()
                 
-                parent_asin_df_sorted = pd.concat(filtered_groups, ignore_index=True)
+                for idx, parent_row in parent_rows_in_order.iterrows():
+                    parent_asin = parent_row['Parent ASIN']
+                    if parent_asin in seen_parents:
+                        continue
+                    seen_parents.add(parent_asin)
+                    
+                    # Add parent row
+                    filtered_rows.append(parent_row)
+                    
+                    # Get children for this parent (already in sorted order from earlier)
+                    # and limit to max_children
+                    child_count = 0
+                    for child_idx, child_row in parent_asin_df_sorted.iterrows():
+                        if child_row['Type'] == 'Child' and child_row['Parent ASIN'] == parent_asin:
+                            if child_count < max_children:
+                                filtered_rows.append(child_row)
+                                child_count += 1
+                
+                if filtered_rows:
+                    parent_asin_df_sorted = pd.DataFrame(filtered_rows)
+                    parent_asin_df_sorted = parent_asin_df_sorted.reset_index(drop=True)
             
             # Filter to hide rows with zero metrics if requested
             if hide_zero_metrics:
@@ -32463,6 +33195,73 @@ if st.session_state.current_page == "advertising_audit":
                     (total_sales_vals > 0) |
                     (sessions_vals > 0)
                 ].copy()
+            
+            # Store total count before pagination
+            total_rows = len(parent_asin_df_sorted)
+            
+            # Add pagination controls if dataset is large
+            if total_rows > 500:
+                st.markdown("---")
+                pagination_col1, pagination_col2, pagination_col3, pagination_col4 = st.columns([2, 2, 3, 3])
+                
+                with pagination_col1:
+                    rows_per_page = st.selectbox(
+                        "Rows per page:",
+                        options=[50, 100, 200, 500, 1000],
+                        index=1,  # Default to 100
+                        key="parent_asin_rows_per_page_select"
+                    )
+                    st.session_state.parent_asin_rows_per_page = rows_per_page
+                
+                # Calculate total pages
+                total_pages = (total_rows + rows_per_page - 1) // rows_per_page
+                
+                # Reset page if it's out of bounds
+                if st.session_state.parent_asin_page_num >= total_pages:
+                    st.session_state.parent_asin_page_num = 0
+                
+                with pagination_col2:
+                    page_num = st.number_input(
+                        "Page:",
+                        min_value=1,
+                        max_value=max(1, total_pages),
+                        value=st.session_state.parent_asin_page_num + 1,
+                        key="parent_asin_page_input"
+                    )
+                    st.session_state.parent_asin_page_num = page_num - 1
+                
+                with pagination_col3:
+                    st.markdown(f"<div style='padding-top: 1.5rem;'>Showing {st.session_state.parent_asin_page_num * rows_per_page + 1} - {min((st.session_state.parent_asin_page_num + 1) * rows_per_page, total_rows)} of {total_rows:,} rows</div>", unsafe_allow_html=True)
+                
+                with pagination_col4:
+                    nav_col1, nav_col2, nav_col3 = st.columns(3)
+                    with nav_col1:
+                        if st.button("⏮ First", key="parent_asin_first_page", disabled=(st.session_state.parent_asin_page_num == 0)):
+                            st.session_state.parent_asin_page_num = 0
+                            st.rerun()
+                    with nav_col2:
+                        if st.button("◀ Prev", key="parent_asin_prev_page", disabled=(st.session_state.parent_asin_page_num == 0)):
+                            st.session_state.parent_asin_page_num -= 1
+                            st.rerun()
+                    with nav_col3:
+                        if st.button("Next ▶", key="parent_asin_next_page", disabled=(st.session_state.parent_asin_page_num >= total_pages - 1)):
+                            st.session_state.parent_asin_page_num += 1
+                            st.rerun()
+                
+                st.markdown("---")
+            else:
+                # Reset pagination if data is small
+                st.session_state.parent_asin_page_num = 0
+                st.session_state.parent_asin_rows_per_page = total_rows if total_rows > 0 else 100
+                total_pages = 1  # Only one page for small datasets
+            
+            # Save full dataset for export before pagination
+            parent_asin_df_full = parent_asin_df_sorted.copy()
+            
+            # Apply pagination slice
+            start_idx = st.session_state.parent_asin_page_num * st.session_state.parent_asin_rows_per_page
+            end_idx = start_idx + st.session_state.parent_asin_rows_per_page
+            parent_asin_df_sorted = parent_asin_df_sorted.iloc[start_idx:end_idx].copy()
             
             # Format the display dataframe
             display_df = parent_asin_df_sorted[display_columns].copy()
@@ -32521,9 +33320,13 @@ if st.session_state.current_page == "advertising_audit":
             if enable_edit_mode:
                 # Edit Mode: Show editable table without conditional formatting
                 
+                # Add pagination warning for edit mode if applicable
+                if total_rows > 500:
+                    st.info(f"ℹ️ **Edit Mode with Pagination**: You're viewing page {st.session_state.parent_asin_page_num + 1} of {total_pages}. Changes will only be saved for rows visible on the current page. Navigate to other pages to edit additional rows.")
+                
                 # Initialize temp DataFrame for editing (preserves edits between reruns until saved)
                 # Create a unique key based on filters and settings
-                filter_key = f"{show_only_parents}_{use_parent_campaign_group}_{selected_sort}_{conditional_scope}"
+                filter_key = f"{show_only_parents}_{use_parent_campaign_group}_{selected_sort}"
                 if 'parent_asin_editor_temp' not in st.session_state or st.session_state.get('last_parent_asin_filter_key') != filter_key:
                     st.session_state.parent_asin_editor_temp = display_df.copy()
                     st.session_state.last_parent_asin_filter_key = filter_key
@@ -32652,8 +33455,8 @@ if st.session_state.current_page == "advertising_audit":
                         from openpyxl.utils.dataframe import dataframe_to_rows
                         import io
                         
-                        # Create numeric version for export (recreate the original data without formatting)
-                        numeric_df = parent_asin_df_sorted[display_columns].copy()
+                        # Create numeric version for export (use full dataset, not paginated)
+                        numeric_df = parent_asin_df_full[display_columns].copy()
                         
                         # Convert percentage columns to numeric for conditional formatting
                         for col in ['% of Spend', '% of Ad Sales', '% of Total Sales']:
@@ -32728,7 +33531,7 @@ if st.session_state.current_page == "advertising_audit":
                         
                         # Apply conditional formatting to percentage columns respecting current scope
                         percentage_cols = ['% of Spend', '% of Ad Sales', '% of Total Sales']
-                        use_account = (conditional_scope == "Account-wide") or show_only_parents
+                        use_account = show_only_parents
                         
                         for col in percentage_cols:
                             if col in export_df.columns and col in col_mapping:
@@ -32862,7 +33665,7 @@ if st.session_state.current_page == "advertising_audit":
             st.markdown("##### Parent ASIN Allocation Chart")
         
             # Create tabs for different visualization types
-            parent_asin_viz_tabs = st.tabs(["% Values", "$ Values", "Bubble Chart", "Donut Chart"])
+            parent_asin_viz_tabs = st.tabs(["% Values", "$ Values", "Bubble Chart", "Donut Chart", "Parent Treemap"])
         
             # Initialize common variables with default values
             if 'parent_asin_viz_sort_by' not in st.session_state:
@@ -33768,13 +34571,617 @@ if st.session_state.current_page == "advertising_audit":
                         )
                     )
                     
-                    st.plotly_chart(fig_total_sales, use_container_width=True)
+                    # Child Breakdown Visualization Tab (new tab for ASIN Allocation Chart)
+                    with asin_viz_tabs[4]:
+                        # Add chart controls specific to Child Breakdown tab
+                        with st.expander("Chart Display Options", expanded=False):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                treemap_metric = st.selectbox(
+                                    "Size Represents:",
+                                    options=["Spend", "Ad Sales", "Total Sales"],
+                                    index=0,
+                                    key="child_breakdown_treemap_metric"
+                                )
+                            with col2:
+                                treemap_color = st.selectbox(
+                                    "Color Represents:",
+                                    options=["TACoS", "ACoS", "ROAS", "Total Sales", "Ad Sales", "Spend"],
+                                    index=0,
+                                    key="child_breakdown_treemap_color"
+                                )
+                        
+                        # Get all child ASINs from the dataset
+                        all_children_df = parent_asin_df[parent_asin_df['Type'] == 'Child'].copy()
+                        
+                        if not all_children_df.empty:
+                            # Helper functions for formatting
+                            def fmt_money(x): return f"${x:,.2f}"
+                            def fmt_pct(x): return f"{x:.1f}%"
+                            def fmt_roas(x): return f"{x:.2f}x"
+                            
+                            # Prepare lists for go.Treemap
+                            ids = []
+                            labels = []
+                            parents_list = []
+                            values = []
+                            colors = []
+                            hover_texts = []
+                            custom_data = []
+                            
+                            # 1. Add Root Node
+                            root_id = "Root"
+                            ids.append(root_id)
+                            labels.append("All Child ASINs")
+                            parents_list.append("")
+                            values.append(0)
+                            colors.append(0)
+                            hover_texts.append("All Child ASINs")
+                            custom_data.append("root")
+                            
+                            # Check if Product Group column exists and has data
+                            has_pg = 'Product Group' in all_children_df.columns
+                            if has_pg:
+                                # Get unique product groups
+                                product_groups = all_children_df['Product Group'].fillna('').astype(str).str.strip()
+                                unique_pgs = product_groups.unique()
+                                has_pg = len([pg for pg in unique_pgs if pg and pg != '']) > 0
+                            
+                            # 2. Add Product Group nodes if available
+                            pg_map = {}
+                            if has_pg:
+                                # Aggregate metrics by Product Group
+                                pg_agg = all_children_df.groupby(
+                                    all_children_df['Product Group'].fillna('Uncategorized').astype(str).str.strip().replace('', 'Uncategorized')
+                                ).agg({
+                                    'Spend': 'sum',
+                                    'Ad Sales': 'sum',
+                                    'Total Sales': 'sum'
+                                }).reset_index()
+                                
+                                # Calculate derived metrics for each PG
+                                for _, pg_row in pg_agg.iterrows():
+                                    pg_name = str(pg_row['Product Group'])
+                                    if not pg_name or pg_name == '':
+                                        pg_name = 'Uncategorized'
+                                    
+                                    pg_id = f"pg_{pg_name}"
+                                    pg_map[pg_name] = pg_id
+                                    
+                                    pg_spend = float(pg_row.get('Spend', 0))
+                                    pg_ad_sales = float(pg_row.get('Ad Sales', 0))
+                                    pg_total_sales = float(pg_row.get('Total Sales', 0))
+                                    pg_acos = (pg_spend / pg_ad_sales * 100) if pg_ad_sales > 0 else 0
+                                    pg_tacos = (pg_spend / pg_total_sales * 100) if pg_total_sales > 0 else 0
+                                    pg_roas = pg_ad_sales / pg_spend if pg_spend > 0 else 0
+                                    
+                                    # Color value for PG
+                                    if treemap_color == 'ACoS': pg_color = pg_acos
+                                    elif treemap_color == 'TACoS': pg_color = pg_tacos
+                                    elif treemap_color == 'ROAS': pg_color = pg_roas
+                                    elif treemap_color == 'Spend': pg_color = pg_spend
+                                    elif treemap_color == 'Ad Sales': pg_color = pg_ad_sales
+                                    elif treemap_color == 'Total Sales': pg_color = pg_total_sales
+                                    else: pg_color = 0
+                                    
+                                    ids.append(pg_id)
+                                    labels.append(f"<b>{pg_name}</b>")
+                                    parents_list.append(root_id)
+                                    values.append(0)  # Children will fill this
+                                    colors.append(pg_color)
+                                    
+                                    # Count children in this PG
+                                    child_count = len(all_children_df[
+                                        all_children_df['Product Group'].fillna('Uncategorized').astype(str).str.strip().replace('', 'Uncategorized') == pg_name
+                                    ])
+                                    
+                                    hover_texts.append(
+                                        f"<b>Product Group: {pg_name}</b><br><br>"
+                                        f"<b>Spend:</b> {fmt_money(pg_spend)}<br>"
+                                        f"<b>Ad Sales:</b> {fmt_money(pg_ad_sales)}<br>"
+                                        f"<b>Total Sales:</b> {fmt_money(pg_total_sales)}<br>"
+                                        f"<b>ACoS:</b> {fmt_pct(pg_acos)} | <b>TACoS:</b> {fmt_pct(pg_tacos)}<br>"
+                                        f"<b>ROAS:</b> {fmt_roas(pg_roas)}<br>"
+                                        f"<b>Child ASINs:</b> {child_count}"
+                                    )
+                                    custom_data.append("product_group")
+                            
+                            # Calculate totals for relative sizing
+                            total_spend = all_children_df['Spend'].sum()
+                            total_sales_sum = all_children_df['Total Sales'].sum()
+                            max_val = all_children_df[treemap_metric].max() if treemap_metric in all_children_df.columns else 1
+                            
+                            # 3. Add Child ASIN nodes
+                            for _, row in all_children_df.iterrows():
+                                c_asin = str(row['ASIN'])
+                                c_title = str(row.get('Product Title', ''))[:80]
+                                c_product_group = str(row.get('Product Group', '')).strip() if has_pg else ''
+                                
+                                # Metrics
+                                c_spend = float(row.get('Spend', 0))
+                                c_ad_sales = float(row.get('Ad Sales', 0))
+                                c_total_sales = float(row.get('Total Sales', 0))
+                                c_acos = float(row.get('ACoS', 0))
+                                c_roas = c_ad_sales / c_spend if c_spend > 0 else 0
+                                c_tacos = (c_spend / c_total_sales * 100) if c_total_sales > 0 else 0
+                                
+                                # Size metric
+                                c_val_metric = float(row.get(treemap_metric, 0))
+                                if c_val_metric <= 0:
+                                    continue
+                                
+                                # Color value
+                                if treemap_color == 'ACoS': c_color = c_acos
+                                elif treemap_color == 'TACoS': c_color = c_tacos
+                                elif treemap_color == 'ROAS': c_color = c_roas
+                                elif treemap_color == 'Spend': c_color = c_spend
+                                elif treemap_color == 'Ad Sales': c_color = c_ad_sales
+                                elif treemap_color == 'Total Sales': c_color = c_total_sales
+                                else: c_color = 0
+                                
+                                c_id = f"child_{c_asin}"
+                                ids.append(c_id)
+                                
+                                # Compact label for child
+                                labels.append(f"<b>{c_asin}</b>")
+                                
+                                # Determine parent node
+                                if has_pg and c_product_group:
+                                    pg_key = c_product_group if c_product_group else 'Uncategorized'
+                                    parent_id = pg_map.get(pg_key, root_id)
+                                else:
+                                    parent_id = root_id
+                                
+                                parents_list.append(parent_id)
+                                values.append(c_val_metric)
+                                colors.append(c_color)
+                                
+                                # Calculate contribution percentages
+                                spend_pct = (c_spend / total_spend * 100) if total_spend > 0 else 0
+                                sales_pct = (c_total_sales / total_sales_sum * 100) if total_sales_sum > 0 else 0
+                                
+                                hover_texts.append(
+                                    f"<b>CHILD: {c_asin}</b><br>"
+                                    f"{c_title}<br>"
+                                    f"<i>Product Group: {c_product_group if c_product_group else 'Untagged'}</i><br><br>"
+                                    f"<b>Spend:</b> {fmt_money(c_spend)} ({spend_pct:.1f}%)<br>"
+                                    f"<b>Ad Sales:</b> {fmt_money(c_ad_sales)}<br>"
+                                    f"<b>Total Sales:</b> {fmt_money(c_total_sales)} ({sales_pct:.1f}%)<br>"
+                                    f"<b>ACoS:</b> {fmt_pct(c_acos)} | <b>TACoS:</b> {fmt_pct(c_tacos)}<br>"
+                                    f"<b>ROAS:</b> {fmt_roas(c_roas)}"
+                                )
+                                custom_data.append("child")
+                            
+                            # Create treemap
+                            fig_treemap = go.Figure(go.Treemap(
+                                ids=ids,
+                                labels=labels,
+                                parents=parents_list,
+                                values=values,
+                                marker=dict(
+                                    colors=colors,
+                                    colorscale='RdYlGn_r' if treemap_color in ['ACoS', 'TACoS'] else 'Greens',
+                                    cmin=0 if treemap_color in ['TACoS', 'ACoS'] else None,
+                                    cmax=40 if treemap_color == 'TACoS' else (100 if treemap_color == 'ACoS' else None),
+                                    showscale=True,
+                                    colorbar=dict(
+                                        title=dict(text=treemap_color, font=dict(size=12)),
+                                        thickness=15,
+                                        len=0.7
+                                    ),
+                                    line=dict(width=2, color='rgba(255,255,255,0.3)'),
+                                    pad=dict(t=40, l=3, r=3, b=3)
+                                ),
+                                hovertemplate='%{text}<extra></extra>',
+                                text=hover_texts,
+                                branchvalues='remainder',
+                                textinfo="label",
+                                textfont=dict(size=11),
+                                textposition="top left",
+                                pathbar=dict(
+                                    visible=True,
+                                    thickness=25,
+                                    textfont=dict(size=12, family="Arial")
+                                ),
+                                tiling=dict(
+                                    packing='squarify',
+                                    pad=4
+                                ),
+                                root=dict(color='rgba(0,0,0,0)')
+                            ))
+                            
+                            title_text = '<b>Child ASIN Breakdown by Product Group</b>' if has_pg else '<b>Child ASIN Breakdown</b>'
+                            subtitle = f'Size: {treemap_metric} | Color: {treemap_color}'
+                            
+                            fig_treemap.update_layout(
+                                margin=dict(t=60, l=10, r=10, b=10),
+                                font=dict(family="Arial, sans-serif", size=11),
+                                title=dict(
+                                    text=f'{title_text}<br><sup>{subtitle}</sup>',
+                                    font=dict(size=16),
+                                    x=0.5,
+                                    xanchor='center'
+                                ),
+                                height=700,
+                                template='plotly_dark',
+                                uniformtext=dict(minsize=8, mode='hide'),
+                                hoverlabel=dict(
+                                    bgcolor="rgba(0,0,0,0.8)",
+                                    font_size=12,
+                                    font_family="Arial"
+                                )
+                            )
+                            
+                            st.plotly_chart(fig_treemap, use_container_width=True)
+                            
+                            info_msg = f"ℹ️ This chart shows all child ASINs"
+                            if has_pg:
+                                info_msg += " grouped by **Product Group**"
+                            info_msg += f". Size represents **{treemap_metric}**, color represents **{treemap_color}**."
+                            if has_pg:
+                                info_msg += " Click on a Product Group to zoom in."
+                            st.info(info_msg)
+                        else:
+                            st.warning("No child ASIN data available.")
             
-                # Add some spacing after the charts
-                st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
+            # Parent Treemap Visualization Tab (new tab)
+            with parent_asin_viz_tabs[4]:
+                # Add chart controls
+                with st.expander("Chart Display Options", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        treemap_metric = st.selectbox(
+                            "Size Represents:",
+                            options=["Spend", "Ad Sales", "Total Sales"],
+                            index=0,
+                            key="parent_level_treemap_metric"
+                        )
+                    with col2:
+                        treemap_color = st.selectbox(
+                            "Color Represents:",
+                            options=["TACoS", "ACoS", "ROAS", "Total Sales", "Ad Sales", "Spend"],
+                            index=0,
+                            key="parent_level_treemap_color"
+                        )
+                    with col3:
+                        treemap_max_children = st.selectbox(
+                            "Max Children per Parent:",
+                            options=[3, 5, 10, "All"],
+                            index=1,
+                            key="parent_level_treemap_max_children"
+                        )
+                
+                sort_by = st.session_state.get('parent_asin_viz_sort_by', 'Total Sales')
+                display_count = st.session_state.get('parent_asin_viz_count', 10)
+                
+                # Use parent_asin_df (which contains all parents and children)
+                if 'parent_asin_df' in locals() and not parent_asin_df.empty:
+                    parents_df = parent_asin_df[parent_asin_df['Type'] == 'Parent'].copy()
+                    children_df = parent_asin_df[parent_asin_df['Type'] == 'Child'].copy()
+                    
+                    if not parents_df.empty:
+                        # Sort and take top N parents
+                        if sort_by in parents_df.columns:
+                            top_parents_df = parents_df.sort_values(by=sort_by, ascending=False).head(display_count)
+                        else:
+                            top_parents_df = parents_df.sort_values(by='Total Sales', ascending=False).head(display_count)
+                        
+                        top_parent_asins = set(top_parents_df['ASIN'].tolist())
+                        
+                        # Check for Product Group
+                        has_pg = 'Product Group' in top_parents_df.columns and top_parents_df['Product Group'].str.strip().astype(bool).any()
+                        
+                        ids = []
+                        labels = []
+                        parents_list = []
+                        values = []
+                        colors = []
+                        hover_texts = []
+                        custom_data = []  # For storing type info
+                        
+                        # Helper functions
+                        def fmt_money(x): return f"${x:,.2f}"
+                        def fmt_pct(x): return f"{x:.1f}%"
+                        def fmt_roas(x): return f"{x:.2f}x"
+                        
+                        # Calculate totals for percentages
+                        total_spend = top_parents_df['Spend'].sum()
+                        total_sales_sum = top_parents_df['Total Sales'].sum()
+                        
+                        # 1. Root Node
+                        root_id = "root"
+                        ids.append(root_id)
+                        labels.append(f"<b>Top {display_count} Parent ASINs</b>")
+                        parents_list.append("")
+                        values.append(0)
+                        colors.append(0)
+                        hover_texts.append(f"<b>Top {display_count} Parent ASINs</b><br>Total Spend: {fmt_money(total_spend)}<br>Total Sales: {fmt_money(total_sales_sum)}")
+                        custom_data.append("root")
+                        
+                        # 2. Product Groups (if applicable)
+                        pg_map = {}  # pg_name -> id
+                        pg_metrics = {}  # pg_id -> {spend, sales, etc.}
+                        
+                        if has_pg:
+                            # Calculate metrics per product group
+                            for pg in top_parents_df['Product Group'].unique():
+                                pg_str = str(pg).strip() if pg and str(pg).strip() else "Uncategorized"
+                                pg_id = f"pg_{pg_str}"
+                                
+                                if pg_id not in pg_map:
+                                    pg_map[pg_str] = pg_id
+                                    pg_parents = top_parents_df[top_parents_df['Product Group'].fillna('').str.strip() == (pg if pg and str(pg).strip() else '')]
+                                    if pg_str == "Uncategorized":
+                                        pg_parents = top_parents_df[top_parents_df['Product Group'].fillna('').str.strip() == '']
+                                    
+                                    pg_spend = pg_parents['Spend'].sum()
+                                    pg_ad_sales = pg_parents['Ad Sales'].sum()
+                                    pg_total_sales = pg_parents['Total Sales'].sum()
+                                    pg_acos = (pg_spend / pg_ad_sales * 100) if pg_ad_sales > 0 else 0
+                                    pg_tacos = (pg_spend / pg_total_sales * 100) if pg_total_sales > 0 else 0
+                                    pg_roas = pg_ad_sales / pg_spend if pg_spend > 0 else 0
+                                    
+                                    pg_metrics[pg_id] = {
+                                        'spend': pg_spend, 'ad_sales': pg_ad_sales, 'total_sales': pg_total_sales,
+                                        'acos': pg_acos, 'tacos': pg_tacos, 'roas': pg_roas
+                                    }
+                                    
+                                    ids.append(pg_id)
+                                    # Product group label with key metrics
+                                    pg_label = f"<b>{pg_str}</b><br>${pg_spend:,.0f} Spend | ${pg_total_sales:,.0f} Sales"
+                                    labels.append(pg_label)
+                                    parents_list.append(root_id)
+                                    values.append(0)  # Will be calculated from children
+                                    
+                                    # Color based on selected metric
+                                    if treemap_color == 'ACoS': c_val = pg_acos
+                                    elif treemap_color == 'TACoS': c_val = pg_tacos
+                                    elif treemap_color == 'ROAS': c_val = pg_roas
+                                    elif treemap_color == 'Spend': c_val = pg_spend
+                                    elif treemap_color == 'Ad Sales': c_val = pg_ad_sales
+                                    elif treemap_color == 'Total Sales': c_val = pg_total_sales
+                                    else: c_val = 0
+                                    colors.append(c_val)
+                                    
+                                    hover_texts.append(
+                                        f"<b>📁 {pg_str}</b><br>"
+                                        f"<b>Spend:</b> {fmt_money(pg_spend)} ({pg_spend/total_spend*100:.1f}% of total)<br>"
+                                        f"<b>Total Sales:</b> {fmt_money(pg_total_sales)} ({pg_total_sales/total_sales_sum*100:.1f}% of total)<br>"
+                                        f"<b>ACoS:</b> {fmt_pct(pg_acos)} | <b>TACoS:</b> {fmt_pct(pg_tacos)}<br>"
+                                        f"<b>ROAS:</b> {fmt_roas(pg_roas)}"
+                                    )
+                                    custom_data.append("product_group")
 
-        else:
-            st.info("No Parent ASIN data in Sales Report")
+                        # 3. Parent Nodes with their Children
+                        for _, row in top_parents_df.iterrows():
+                            p_asin = str(row['ASIN'])
+                            p_title = str(row.get('Product Title', ''))[:60]
+                            
+                            spend = float(row.get('Spend', 0))
+                            ad_sales = float(row.get('Ad Sales', 0))
+                            total_sales = float(row.get('Total Sales', 0))
+                            acos = float(row.get('ACoS', 0))
+                            roas = ad_sales / spend if spend > 0 else 0
+                            tacos = (spend / total_sales * 100) if total_sales > 0 else 0
+                            child_count = int(row.get('Child Count', 0))
+                            
+                            val_metric = float(row.get(treemap_metric, 0))
+                            if val_metric <= 0: continue
+                            
+                            # Color value
+                            if treemap_color == 'ACoS': c_val = acos
+                            elif treemap_color == 'TACoS': c_val = tacos
+                            elif treemap_color == 'ROAS': c_val = roas
+                            elif treemap_color == 'Spend': c_val = spend
+                            elif treemap_color == 'Ad Sales': c_val = ad_sales
+                            elif treemap_color == 'Total Sales': c_val = total_sales
+                            else: c_val = 0
+                            
+                            p_id = f"parent_{p_asin}"
+                            
+                            # Check if this parent has children with data
+                            parent_children = children_df[children_df['Parent ASIN'] == p_asin].copy()
+                            has_children_data = False
+                            if not parent_children.empty:
+                                parent_children = parent_children.sort_values(by=treemap_metric, ascending=False)
+                                max_children_limit = treemap_max_children
+                                if max_children_limit != "All":
+                                    parent_children = parent_children.head(int(max_children_limit))
+                                # Check if any children have positive metric values
+                                has_children_data = (parent_children[treemap_metric] > 0).any()
+                            
+                            ids.append(p_id)
+                            
+                            # Parent label - ASIN first, then Product Group if available
+                            spend_pct = (spend / total_spend * 100) if total_spend > 0 else 0
+                            sales_pct = (total_sales / total_sales_sum * 100) if total_sales_sum > 0 else 0
+                            p_product_group = str(row.get('Product Group', '')).strip()
+                            
+                            # Build label with ASIN prominently at top, then Product Group
+                            if p_product_group:
+                                parent_label = (
+                                    f"<b>{p_asin}</b> - {p_product_group}"
+                                )
+                            else:
+                                parent_label = (
+                                    f"<b>{p_asin}</b>"
+                                )
+                            labels.append(parent_label)
+                            
+                            # Determine parent node
+                            if has_pg:
+                                pg_str = str(row.get('Product Group', '')).strip()
+                                if not pg_str: pg_str = "Uncategorized"
+                                pg_id = pg_map.get(pg_str, root_id)
+                                parents_list.append(pg_id)
+                            else:
+                                parents_list.append(root_id)
+                            
+                            # If parent has children, set value to 0 (children will fill it)
+                            # If no children, use the parent's own metric value as a leaf
+                            if has_children_data:
+                                values.append(0)
+                            else:
+                                values.append(val_metric)
+                            colors.append(c_val)
+                            
+                            hover_texts.append(
+                                f"<b>PARENT: {p_asin}</b><br>"
+                                f"{p_title}<br><br>"
+                                f"<b>Spend:</b> {fmt_money(spend)} ({spend_pct:.1f}%)<br>"
+                                f"<b>Ad Sales:</b> {fmt_money(ad_sales)}<br>"
+                                f"<b>Total Sales:</b> {fmt_money(total_sales)} ({sales_pct:.1f}%)<br>"
+                                f"<b>ACoS:</b> {fmt_pct(acos)} | <b>TACoS:</b> {fmt_pct(tacos)}<br>"
+                                f"<b>ROAS:</b> {fmt_roas(roas)}<br>"
+                                f"<b>Children:</b> {child_count}"
+                            )
+                            custom_data.append("parent")
+                            
+                            # 4. Add Children for this Parent (if they have data)
+                            if has_children_data:
+                                for _, child_row in parent_children.iterrows():
+                                    c_asin = str(child_row['ASIN'])
+                                    c_title = str(child_row.get('Product Title', ''))[:50]
+                                    
+                                    c_spend = float(child_row.get('Spend', 0))
+                                    c_ad_sales = float(child_row.get('Ad Sales', 0))
+                                    c_total_sales = float(child_row.get('Total Sales', 0))
+                                    c_acos = float(child_row.get('ACoS', 0))
+                                    c_roas = c_ad_sales / c_spend if c_spend > 0 else 0
+                                    c_tacos = (c_spend / c_total_sales * 100) if c_total_sales > 0 else 0
+                                    c_product_group = str(child_row.get('Product Group', '')).strip()
+                                    
+                                    c_val_metric = float(child_row.get(treemap_metric, 0))
+                                    if c_val_metric <= 0: continue
+                                    
+                                    # Color value for child
+                                    if treemap_color == 'ACoS': c_color = c_acos
+                                    elif treemap_color == 'TACoS': c_color = c_tacos
+                                    elif treemap_color == 'ROAS': c_color = c_roas
+                                    elif treemap_color == 'Spend': c_color = c_spend
+                                    elif treemap_color == 'Ad Sales': c_color = c_ad_sales
+                                    elif treemap_color == 'Total Sales': c_color = c_total_sales
+                                    else: c_color = 0
+                                    
+                                    c_id = f"child_{c_asin}_{p_asin}"
+                                    ids.append(c_id)
+                                    
+                                    # Child label - ASIN first, then Product Group, then metrics
+                                    if c_product_group:
+                                        child_label = (
+                                            f"<b>{c_asin}</b><br>"
+                                            f"{c_product_group}<br>"
+                                            f"Spend: ${c_spend:,.0f}<br>"
+                                            f"Total Sales: ${c_total_sales:,.0f}<br>"
+                                            f"ACoS: {c_acos:.1f}%<br>"
+                                            f"TACoS: {c_tacos:.1f}%"
+                                        )
+                                    else:
+                                        child_label = (
+                                            f"<b>{c_asin}</b><br>"
+                                            f"Spend: ${c_spend:,.0f}<br>"
+                                            f"Total Sales: ${c_total_sales:,.0f}<br>"
+                                            f"ACoS: {c_acos:.1f}%<br>"
+                                            f"TACoS: {c_tacos:.1f}%"
+                                        )
+                                    labels.append(child_label)
+                                    parents_list.append(p_id)
+                                    values.append(c_val_metric)
+                                    colors.append(c_color)
+                                    
+                                    # Calculate child's contribution to parent
+                                    spend_contrib = (c_spend / spend * 100) if spend > 0 else 0
+                                    sales_contrib = (c_total_sales / total_sales * 100) if total_sales > 0 else 0
+                                    
+                                    hover_texts.append(
+                                        f"<b>CHILD: {c_asin}</b><br>"
+                                        f"{c_title}<br>"
+                                        f"<i>Product Group: {c_product_group if c_product_group else 'Untagged'}</i><br><br>"
+                                        f"<b>Spend:</b> {fmt_money(c_spend)} ({spend_contrib:.1f}% of parent)<br>"
+                                        f"<b>Ad Sales:</b> {fmt_money(c_ad_sales)}<br>"
+                                        f"<b>Total Sales:</b> {fmt_money(c_total_sales)} ({sales_contrib:.1f}% of parent)<br>"
+                                        f"<b>ACoS:</b> {fmt_pct(c_acos)} | <b>TACoS:</b> {fmt_pct(c_tacos)}<br>"
+                                        f"<b>ROAS:</b> {fmt_roas(c_roas)}"
+                                    )
+                                    custom_data.append("child")
+                        
+                        # Create treemap with hierarchical structure
+                        fig_treemap = go.Figure(go.Treemap(
+                            ids=ids,
+                            labels=labels,
+                            parents=parents_list,
+                            values=values,
+                            marker=dict(
+                                colors=colors,
+                                colorscale='RdYlGn_r' if treemap_color in ['ACoS', 'TACoS'] else 'Greens',
+                                cmin=0 if treemap_color in ['TACoS', 'ACoS'] else None,
+                                cmax=40 if treemap_color == 'TACoS' else (100 if treemap_color == 'ACoS' else None),
+                                showscale=True,
+                                colorbar=dict(
+                                    title=dict(text=treemap_color, font=dict(size=12)),
+                                    thickness=15,
+                                    len=0.7
+                                ),
+                                line=dict(width=2, color='rgba(255,255,255,0.3)'),
+                                pad=dict(t=40, l=3, r=3, b=3)  # Top padding for parent labels
+                            ),
+                            hovertemplate='%{text}<extra></extra>',
+                            text=hover_texts,
+                            branchvalues='remainder',
+                            textinfo="label",
+                            textfont=dict(size=11),
+                            textposition="top left",
+                            pathbar=dict(
+                                visible=True,
+                                thickness=25,
+                                textfont=dict(size=12, family="Arial")
+                            ),
+                            tiling=dict(
+                                packing='squarify',
+                                pad=4
+                            ),
+                            root=dict(color='rgba(0,0,0,0)')
+                        ))
+                        
+                        fig_treemap.update_layout(
+                            margin=dict(t=60, l=10, r=10, b=10),
+                            font=dict(family="Arial, sans-serif", size=11),
+                            title=dict(
+                                text=f'<b>Parent-Child ASIN Hierarchy</b><br><sup>Size: {treemap_metric} | Color: {treemap_color} | Top {display_count} Parents by {sort_by}</sup>',
+                                font=dict(size=16),
+                                x=0.5,
+                                xanchor='center'
+                            ),
+                            height=750,
+                            template='plotly_dark',
+                            uniformtext=dict(minsize=8, mode='hide'),
+                            hoverlabel=dict(
+                                bgcolor="rgba(0,0,0,0.9)",
+                                font_size=12,
+                                font_family="Arial",
+                                bordercolor="rgba(255,255,255,0.3)"
+                            )
+                        )
+                        
+                        st.plotly_chart(fig_treemap, use_container_width=True)
+                        
+                        # Add summary metrics below the chart
+                        st.markdown("---")
+                        summary_cols = st.columns(4)
+                        with summary_cols[0]:
+                            st.metric("Total Spend", f"${total_spend:,.0f}")
+                        with summary_cols[1]:
+                            st.metric("Total Sales", f"${total_sales_sum:,.0f}")
+                        with summary_cols[2]:
+                            avg_acos = (total_spend / top_parents_df['Ad Sales'].sum() * 100) if top_parents_df['Ad Sales'].sum() > 0 else 0
+                            st.metric("Avg ACoS", f"{avg_acos:.1f}%")
+                        with summary_cols[3]:
+                            avg_tacos = (total_spend / total_sales_sum * 100) if total_sales_sum > 0 else 0
+                            st.metric("Avg TACoS", f"{avg_tacos:.1f}%")
+                    else:
+                        st.info("No Parent data available.")
+                else:
+                    st.warning("Parent ASIN data not available.")
         # --- Performance by Product Group ---
     # Only show on the Advertising Audit page
     if st.session_state.current_page == "advertising_audit":
@@ -33803,6 +35210,14 @@ if st.session_state.current_page == "advertising_audit":
             st.markdown("<span class='main-section-header dashboard-section'>Performance by Product Group</span>", unsafe_allow_html=True)
             st.markdown("<div style='margin-bottom:1.2rem;'></div>", unsafe_allow_html=True)
 
+            # Setting to include untracked ASINs (in ad reports but not in Branded ASINs)
+            include_untracked_asins = st.checkbox(
+                "Include Untracked ASINs",
+                value=True,
+                key="pg_include_untracked_asins",
+                help="When checked, includes ASINs from ad reports that are not in your Branded ASINs list. These will appear under 'Untagged Group'."
+            )
+
             # Debug information about available columns
             # Aggregate required columns
             agg_dict = {}
@@ -33815,6 +35230,16 @@ if st.session_state.current_page == "advertising_audit":
             if agg_dict:
                 # First, create a copy of the dataframe with consistent handling of untagged items
                 temp_df = st.session_state.asin_perf_df.copy()
+        
+                # Get set of ASINs that are in branded_asins_data (tracked products)
+                branded_asins_set = set()
+                if st.session_state.client_config and 'branded_asins_data' in st.session_state.client_config:
+                    branded_asins_set = {str(a).strip().upper() for a in st.session_state.client_config['branded_asins_data'].keys()}
+                
+                # Only include ASINs that are in branded_asins_data for Product Group summary
+                # Unless the user has opted to include untracked ASINs
+                if branded_asins_set and 'ASIN' in temp_df.columns and not include_untracked_asins:
+                    temp_df = temp_df[temp_df['ASIN'].astype(str).str.strip().str.upper().isin(branded_asins_set)].copy()
         
                 # Replace empty or NaN product group values with 'Untagged Group'
                 # Also replace 'Unassigned' with 'Untagged Group' for consistency
@@ -33877,7 +35302,7 @@ if st.session_state.current_page == "advertising_audit":
                 pg_available_tags = {}
                 if st.session_state.client_config and 'branded_asins_data' in st.session_state.client_config:
                     for tag_num in [1, 2, 3]:
-                        tag_key = f'tag_{tag_num}'
+                        tag_key = f'tag{tag_num}'
                         tag_col = f'Tag {tag_num}'
                         tag_values = set()
                         for asin_info in st.session_state.client_config['branded_asins_data'].values():
@@ -33931,6 +35356,9 @@ if st.session_state.current_page == "advertising_audit":
                     if not sb_campaign_df.empty:
                         # Filter for Sponsored Brands campaigns only
                         sb_data = sb_campaign_df[sb_campaign_df['Ad Type'] == 'SB'].copy()
+                        
+                        # Exclude campaigns with empty Product Group (not in campaign_tags_data)
+                        sb_data = sb_data[sb_data['Product Group'].astype(str).str.strip() != '']
                     
                         if not sb_data.empty:
                             # Group SB data by Product Group and aggregate
@@ -35744,6 +37172,1695 @@ if 'bulk_data' in st.session_state and st.session_state.bulk_data is not None:
 
 if 'sales_report_data' in st.session_state and st.session_state.sales_report_data is not None:
     track_session_activity("Sales Data", "Sales report processed successfully")
+
+# =============================================================================
+# ACCOUNT INSIGHTS SECTION - Summary of key account metrics
+# Only show on the Advertising Audit page when data is available
+# =============================================================================
+if st.session_state.get('current_page') == "advertising_audit" and st.session_state.get('bulk_data') is not None:
+    st.markdown("<div id='account-insights' class='section-anchor'></div>", unsafe_allow_html=True)
+    st.markdown("<hr style='height:2px;border-width:0;color:gold;background-color:gold;margin-top:25px;margin-bottom:15px;margin-left:10px;margin-right:10px'>", unsafe_allow_html=True)
+    st.markdown("<span class='main-section-header dashboard-section'>Account Insights</span>", unsafe_allow_html=True)
+    st.markdown("*Key findings and metrics summary from your advertising data*")
+    
+    try:
+        bulk_data = st.session_state.bulk_data
+        client_config = st.session_state.get('client_config', {})
+        
+        # Storage for categorized insights
+        spend_insights = []
+        efficiency_insights = []
+        top_performers = []  # List of (title, items_list) tuples
+        opportunity_insights = []
+        structure_insights = []
+        
+        def truncate_str(s, max_len=50):
+            s = str(s)
+            return s if len(s) <= max_len else s[:max_len-3] + "..."
+        
+        # --- Search Term Data Insights ---
+        try:
+            search_term_df = get_search_term_data(bulk_data, client_config)
+            if search_term_df is not None and not search_term_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Orders', 'Clicks', 'Impressions']:
+                    if col in search_term_df.columns:
+                        search_term_df[col] = pd.to_numeric(search_term_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in search_term_df.columns else 'Sales'
+                total_st_spend = search_term_df['Spend'].sum() if 'Spend' in search_term_df.columns else 0
+                total_st_sales = search_term_df[sales_col].sum() if sales_col in search_term_df.columns else 0
+                total_st_clicks = search_term_df['Clicks'].sum() if 'Clicks' in search_term_df.columns else 0
+                total_st_orders = search_term_df['Orders'].sum() if 'Orders' in search_term_df.columns else 0
+                unique_search_terms = search_term_df['Search Term'].nunique() if 'Search Term' in search_term_df.columns else 0
+                
+                # Total search terms count
+                if unique_search_terms > 0:
+                    structure_insights.append(f"**{unique_search_terms:,}** unique search terms analyzed")
+                
+                # Conversion rate from clicks
+                if total_st_clicks > 0 and total_st_orders > 0:
+                    conv_rate = (total_st_orders / total_st_clicks) * 100
+                    efficiency_insights.append(f"Search term conversion rate: **{conv_rate:.2f}%** ({total_st_orders:,} orders / {total_st_clicks:,} clicks)")
+                
+                # Average CPC
+                if total_st_clicks > 0 and total_st_spend > 0:
+                    avg_cpc = total_st_spend / total_st_clicks
+                    efficiency_insights.append(f"Average CPC: **\${avg_cpc:.2f}**")
+                
+                # Non-Branded vs Branded
+                if 'Is Branded' in search_term_df.columns:
+                    non_branded_df = search_term_df[search_term_df['Is Branded'] == False]
+                    branded_df = search_term_df[search_term_df['Is Branded'] == True]
+                    non_branded_spend = non_branded_df['Spend'].sum() if not non_branded_df.empty else 0
+                    branded_spend = branded_df['Spend'].sum() if not branded_df.empty else 0
+                    non_branded_sales = non_branded_df[sales_col].sum() if not non_branded_df.empty else 0
+                    branded_sales = branded_df[sales_col].sum() if not branded_df.empty else 0
+                    non_branded_count = non_branded_df['Search Term'].nunique() if 'Search Term' in non_branded_df.columns else 0
+                    branded_count = branded_df['Search Term'].nunique() if 'Search Term' in branded_df.columns else 0
+                    
+                    if non_branded_spend > 0 and branded_spend > 0:
+                        total_spend = non_branded_spend + branded_spend
+                        spend_insights.append(f"Non-Branded: **\${non_branded_spend:,.0f}** ({(non_branded_spend/total_spend)*100:.1f}%) vs Branded: **\${branded_spend:,.0f}** ({(branded_spend/total_spend)*100:.1f}%)")
+                    if total_st_sales > 0 and non_branded_sales > 0:
+                        spend_insights.append(f"Non-Branded drove **\${non_branded_sales:,.0f}** ad sales ({(non_branded_sales/total_st_sales)*100:.1f}% of total)")
+                    if branded_spend > 0 and non_branded_spend > 0:
+                        b_roas = branded_sales / branded_spend if branded_spend > 0 else 0
+                        nb_roas = non_branded_sales / non_branded_spend if non_branded_spend > 0 else 0
+                        if b_roas > 0 and nb_roas > 0:
+                            efficiency_insights.append(f"Branded ROAS: **{b_roas:.2f}** vs Non-Branded ROAS: **{nb_roas:.2f}**")
+                    if non_branded_count > 0 and branded_count > 0:
+                        structure_insights.append(f"**{non_branded_count:,}** non-branded vs **{branded_count:,}** branded search terms")
+                
+                # Top 80% search terms
+                if 'Search Term' in search_term_df.columns and 'Spend' in search_term_df.columns:
+                    st_agg = search_term_df.groupby('Search Term').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    st_agg['ROAS'] = st_agg[sales_col] / st_agg['Spend'].replace(0, np.nan)
+                    st_agg = st_agg.sort_values('Spend', ascending=False)
+                    st_agg['Cumulative'] = st_agg['Spend'].cumsum()
+                    total_kw_spend = st_agg['Spend'].sum()
+                    if total_kw_spend > 0:
+                        top_80_ct = len(st_agg[st_agg['Cumulative'] <= total_kw_spend * 0.80]) + 1
+                        structure_insights.append(f"**{top_80_ct:,}** search terms account for 80% of spend ({top_80_ct/len(st_agg)*100:.1f}% of {len(st_agg):,})")
+                    
+                    # Search terms with sales vs without
+                    st_with_sales = len(st_agg[st_agg[sales_col] > 0])
+                    st_without_sales = len(st_agg[st_agg[sales_col] == 0])
+                    if st_with_sales > 0:
+                        structure_insights.append(f"**{st_with_sales:,}** search terms have sales, **{st_without_sales:,}** have \$0 sales")
+                    
+                    # Top 3 search terms by spend
+                    top_3_st = st_agg.nlargest(3, 'Spend')
+                    if len(top_3_st) > 0:
+                        items = [f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r['Spend']:,.0f} spend, {r['ROAS']:.2f}x ROAS" if pd.notna(r['ROAS']) else f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r['Spend']:,.0f} spend" for _,r in top_3_st.iterrows()]
+                        top_performers.append(("Top 3 Search Terms by Spend", items))
+                    
+                    # Top 3 by sales
+                    top_3_sales = st_agg.nlargest(3, sales_col)
+                    if len(top_3_sales) > 0:
+                        items = [f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_sales.iterrows()]
+                        sales_label = 'Ad Sales' if sales_col == 'Ad Sales' else 'Total Sales'
+                        top_performers.append((f"Top 3 Search Terms by {sales_label}", items))
+                    
+                    # Wasted spend (high spend, no sales)
+                    waste_df = st_agg[(st_agg['Spend'] > 50) & (st_agg[sales_col] == 0)].nlargest(3, 'Spend')
+                    if len(waste_df) > 0:
+                        waste_total = waste_df['Spend'].sum()
+                        waste_count = len(st_agg[(st_agg['Spend'] > 50) & (st_agg[sales_col] == 0)])
+                        waste_terms = ', '.join([truncate_str(r['Search Term'],25) for _,r in waste_df.iterrows()])
+                        opportunity_insights.append(f"**\${waste_total:,.0f}** wasted on {waste_count} search terms with \$0 sales (top: {waste_terms})")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Search term error: {e}")
+        
+        # --- Campaign Data Insights ---
+        try:
+            campaign_df = get_campaign_performance_data(bulk_data, client_config)
+            if campaign_df is not None and not campaign_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Clicks', 'Impressions', 'Orders']:
+                    if col in campaign_df.columns:
+                        campaign_df[col] = pd.to_numeric(campaign_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in campaign_df.columns else 'Sales'
+                total_camp_spend = campaign_df['Spend'].sum() if 'Spend' in campaign_df.columns else 0
+                total_camp_sales = campaign_df[sales_col].sum() if sales_col in campaign_df.columns else 0
+                total_camp_clicks = campaign_df['Clicks'].sum() if 'Clicks' in campaign_df.columns else 0
+                total_camp_impressions = campaign_df['Impressions'].sum() if 'Impressions' in campaign_df.columns else 0
+                total_camp_orders = campaign_df['Orders'].sum() if 'Orders' in campaign_df.columns else 0
+                total_campaigns = campaign_df['Campaign Name'].nunique() if 'Campaign Name' in campaign_df.columns else 0
+                
+                # Overall account metrics
+                if total_camp_spend > 0 and total_camp_sales > 0:
+                    overall_acos = (total_camp_spend / total_camp_sales) * 100
+                    overall_roas = total_camp_sales / total_camp_spend
+                    efficiency_insights.append(f"Overall Account: **{overall_acos:.1f}% ACoS** / **{overall_roas:.2f}x ROAS**")
+                    efficiency_insights.append(f"Ad Spend: **\${total_camp_spend:,.0f}** / Ad Sales: **\${total_camp_sales:,.0f}**")
+                
+                # Total campaigns
+                if total_campaigns > 0:
+                    structure_insights.append(f"**{total_campaigns:,}** total campaigns")
+                
+                # Impressions and CTR
+                if total_camp_impressions > 0 and total_camp_clicks > 0:
+                    ctr = (total_camp_clicks / total_camp_impressions) * 100
+                    efficiency_insights.append(f"CTR: **{ctr:.2f}%** ({total_camp_clicks:,} clicks / {total_camp_impressions:,} impressions)")
+                
+                # Total orders
+                if total_camp_orders > 0:
+                    efficiency_insights.append(f"Total orders: **{total_camp_orders:,}**")
+                
+                if 'Campaign Name' in campaign_df.columns and sales_col in campaign_df.columns:
+                    camp_agg = campaign_df.groupby('Campaign Name').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    camp_agg['ROAS'] = camp_agg[sales_col] / camp_agg['Spend'].replace(0, np.nan)
+                    camp_agg['ACoS'] = (camp_agg['Spend'] / camp_agg[sales_col].replace(0, np.nan)) * 100
+                    camp_agg = camp_agg.sort_values(sales_col, ascending=False)
+                    camp_agg['Cumulative'] = camp_agg[sales_col].cumsum()
+                    
+                    # Campaigns with sales vs without
+                    camps_with_sales = len(camp_agg[camp_agg[sales_col] > 0])
+                    camps_without_sales = len(camp_agg[camp_agg[sales_col] == 0])
+                    if camps_with_sales > 0:
+                        structure_insights.append(f"**{camps_with_sales:,}** campaigns have sales, **{camps_without_sales:,}** have \$0 sales")
+                    
+                    if total_camp_sales > 0:
+                        top_80_ct = len(camp_agg[camp_agg['Cumulative'] <= total_camp_sales * 0.80]) + 1
+                        structure_insights.append(f"**{top_80_ct:,}** campaigns drive 80% of ad sales ({top_80_ct/len(camp_agg)*100:.1f}% of {len(camp_agg):,})")
+                    
+                    # Top 3 campaigns by sales
+                    top_3_camp = camp_agg.nlargest(3, sales_col)
+                    if len(top_3_camp) > 0:
+                        items = [f"<strong>{truncate_str(r['Campaign Name'],45)}</strong> — ${r[sales_col]:,.0f} ad sales, {r['ACoS']:.1f}% ACoS" if pd.notna(r['ACoS']) else f"<strong>{truncate_str(r['Campaign Name'],45)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_camp.iterrows()]
+                        sales_label = 'Ad Sales' if sales_col == 'Ad Sales' else 'Total Sales'
+                        top_performers.append((f"Top 3 Campaigns by {sales_label}", items))
+                    
+                    # Campaigns with poor ROAS
+                    poor_camps = camp_agg[(camp_agg['Spend'] > 100) & (camp_agg['ROAS'] < 1)].nlargest(3, 'Spend')
+                    if len(poor_camps) > 0:
+                        poor_spend = poor_camps['Spend'].sum()
+                        poor_count = len(camp_agg[(camp_agg['Spend'] > 100) & (camp_agg['ROAS'] < 1)])
+                        poor_names = ', '.join([truncate_str(r['Campaign Name'],30) for _,r in poor_camps.iterrows()])
+                        opportunity_insights.append(f"**\${poor_spend:,.0f}** spent on {poor_count} campaigns with ROAS < 1.0")
+                
+                # Campaign mix by ad type
+                if 'Product' in campaign_df.columns:
+                    ad_type_counts = campaign_df.groupby('Product')['Campaign Name'].nunique()
+                    if len(ad_type_counts) > 0:
+                        ad_type_str = ", ".join([f"**{ct}** {at}" for at, ct in ad_type_counts.items()])
+                        structure_insights.append(f"Campaign mix: {ad_type_str}")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Campaign error: {e}")
+        
+        # --- ASIN Performance Insights ---
+        try:
+            asin_perf_df = st.session_state.get('asin_perf_df')
+            if asin_perf_df is not None and not asin_perf_df.empty:
+                asin_df = asin_perf_df.copy()
+                for col in ['Spend', 'Total Sales', 'Ad Sales', 'Orders']:
+                    if col in asin_df.columns:
+                        asin_df[col] = pd.to_numeric(asin_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Total Sales' if 'Total Sales' in asin_df.columns else ('Ad Sales' if 'Ad Sales' in asin_df.columns else None)
+                total_asins = asin_df['ASIN'].nunique() if 'ASIN' in asin_df.columns else 0
+                total_asin_spend = asin_df['Spend'].sum() if 'Spend' in asin_df.columns else 0
+                
+                # Total ASINs
+                if total_asins > 0:
+                    structure_insights.append(f"**{total_asins:,}** unique ASINs with ad activity")
+                
+                if sales_col and 'ASIN' in asin_df.columns:
+                    asin_agg = asin_df.groupby('ASIN').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    asin_agg['ROAS'] = asin_agg[sales_col] / asin_agg['Spend'].replace(0, np.nan)
+                    asin_agg = asin_agg.sort_values(sales_col, ascending=False)
+                    asin_agg['Cumulative'] = asin_agg[sales_col].cumsum()
+                    total_asin_sales = asin_agg[sales_col].sum()
+                    
+                    # ASINs with sales vs without
+                    asins_with_sales = len(asin_agg[asin_agg[sales_col] > 0])
+                    asins_without_sales = len(asin_agg[asin_agg[sales_col] == 0])
+                    if asins_with_sales > 0:
+                        structure_insights.append(f"**{asins_with_sales:,}** ASINs have sales, **{asins_without_sales:,}** have \$0 sales")
+                    
+                    if total_asin_sales > 0:
+                        top_80_ct = len(asin_agg[asin_agg['Cumulative'] <= total_asin_sales * 0.80]) + 1
+                        structure_insights.append(f"**{top_80_ct:,}** ASINs drive 80% of total sales ({top_80_ct/len(asin_agg)*100:.1f}% of {len(asin_agg):,})")
+                    
+                    # Average ROAS across ASINs
+                    avg_asin_roas = asin_agg['ROAS'].mean()
+                    if pd.notna(avg_asin_roas) and avg_asin_roas > 0:
+                        efficiency_insights.append(f"Average ASIN ROAS: **{avg_asin_roas:.2f}**")
+                    
+                    # Top 3 ASINs by sales with product titles
+                    branded_asins = client_config.get('branded_asins_data', {})
+                    top_3_asin = asin_agg.nlargest(3, sales_col)
+                    if len(top_3_asin) > 0:
+                        items = []
+                        for _, r in top_3_asin.iterrows():
+                            title = branded_asins.get(r['ASIN'], {}).get('product_title', r['ASIN']) if branded_asins else r['ASIN']
+                            title = truncate_str(title, 40) if title != r['ASIN'] else r['ASIN']
+                            roas_str = f", ROAS: {r['ROAS']:.2f}" if pd.notna(r['ROAS']) and r['ROAS'] > 0 else ""
+                            sales_label = 'ad sales' if sales_col == 'Ad Sales' else 'total sales'
+                            items.append(f"<strong>{title}</strong> — ${r[sales_col]:,.0f} {sales_label}{roas_str}")
+                        sales_label_title = 'Ad Sales' if sales_col == 'Ad Sales' else 'Total Sales'
+                        top_performers.append((f"Top 3 Products by {sales_label_title}", items))
+                    
+                    # ASINs with high spend but poor ROAS
+                    poor_asins = asin_agg[(asin_agg['Spend'] > 100) & (asin_agg['ROAS'] < 0.5)].nlargest(3, 'Spend')
+                    if len(poor_asins) > 0:
+                        poor_spend = poor_asins['Spend'].sum()
+                        poor_count = len(asin_agg[(asin_agg['Spend'] > 100) & (asin_agg['ROAS'] < 0.5)])
+                        opportunity_insights.append(f"**\${poor_spend:,.0f}** spent on {poor_count} ASINs with ROAS < 0.5 - consider reducing bids")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] ASIN error: {e}")
+        
+        # --- Targeting Performance Insights ---
+        try:
+            branded_targets_df, non_branded_targets_df = get_targeting_performance_data(bulk_data, client_config)
+            
+            # Non-Branded targets analysis
+            if non_branded_targets_df is not None and not non_branded_targets_df.empty:
+                nb_df = non_branded_targets_df.copy()
+                for col in ['Spend', 'Ad Sales', 'Sales']:
+                    if col in nb_df.columns:
+                        nb_df[col] = pd.to_numeric(nb_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in nb_df.columns else 'Sales'
+                nb_with_spend = len(nb_df[nb_df['Spend'] > 0]) if 'Spend' in nb_df.columns else 0
+                nb_with_sales = len(nb_df[nb_df[sales_col] > 0]) if sales_col in nb_df.columns else 0
+                nb_total_spend = nb_df['Spend'].sum() if 'Spend' in nb_df.columns else 0
+                nb_total_sales = nb_df[sales_col].sum() if sales_col in nb_df.columns else 0
+                
+                structure_insights.append(f"**{nb_with_spend:,}** Non-Branded targets have spend, **{nb_with_sales:,}** have sales")
+                if nb_total_spend > 0:
+                    nb_roas = nb_total_sales / nb_total_spend if nb_total_spend > 0 else 0
+                    spend_insights.append(f"Non-Branded targeting: **\${nb_total_spend:,.0f}** spend, **\${nb_total_sales:,.0f}** ad sales ({nb_roas:.2f}x ROAS)")
+                
+                # Top 3 non-branded targets by sales
+                if 'Keyword/Product Targeting' in nb_df.columns and sales_col in nb_df.columns:
+                    nb_agg = nb_df.groupby('Keyword/Product Targeting').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    nb_agg['ROAS'] = nb_agg[sales_col] / nb_agg['Spend'].replace(0, np.nan)
+                    top_3_nb = nb_agg.nlargest(3, sales_col)
+                    if len(top_3_nb) > 0 and top_3_nb[sales_col].sum() > 0:
+                        items = [f"<strong>{truncate_str(r['Keyword/Product Targeting'],40)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_nb.iterrows()]
+                        top_performers.append(("Top 3 Non-Branded Targets", items))
+            
+            # Branded targets analysis
+            if branded_targets_df is not None and not branded_targets_df.empty:
+                b_df = branded_targets_df.copy()
+                for col in ['Spend', 'Ad Sales', 'Sales']:
+                    if col in b_df.columns:
+                        b_df[col] = pd.to_numeric(b_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in b_df.columns else 'Sales'
+                b_with_spend = len(b_df[b_df['Spend'] > 0]) if 'Spend' in b_df.columns else 0
+                b_with_sales = len(b_df[b_df[sales_col] > 0]) if sales_col in b_df.columns else 0
+                b_total_spend = b_df['Spend'].sum() if 'Spend' in b_df.columns else 0
+                b_total_sales = b_df[sales_col].sum() if sales_col in b_df.columns else 0
+                
+                structure_insights.append(f"**{b_with_spend:,}** Branded targets have spend, **{b_with_sales:,}** have sales")
+                if b_total_spend > 0:
+                    b_roas = b_total_sales / b_total_spend if b_total_spend > 0 else 0
+                    spend_insights.append(f"Branded targeting: **\${b_total_spend:,.0f}** spend, **\${b_total_sales:,.0f}** ad sales ({b_roas:.2f}x ROAS)")
+                
+                # Top 3 branded targets by sales
+                if 'Keyword/Product Targeting' in b_df.columns and sales_col in b_df.columns:
+                    b_agg = b_df.groupby('Keyword/Product Targeting').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    b_agg['ROAS'] = b_agg[sales_col] / b_agg['Spend'].replace(0, np.nan)
+                    top_3_b = b_agg.nlargest(3, sales_col)
+                    if len(top_3_b) > 0 and top_3_b[sales_col].sum() > 0:
+                        items = [f"<strong>{truncate_str(r['Keyword/Product Targeting'],40)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_b.iterrows()]
+                        top_performers.append(("Top 3 Branded Targets", items))
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Targeting error: {e}")
+        
+        # --- Top Branded/Non-Branded Search Terms ---
+        try:
+            search_term_df = get_search_term_data(bulk_data, client_config)
+            if search_term_df is not None and not search_term_df.empty and 'Is Branded' in search_term_df.columns:
+                for col in ['Spend', 'Ad Sales', 'Sales']:
+                    if col in search_term_df.columns:
+                        search_term_df[col] = pd.to_numeric(search_term_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in search_term_df.columns else 'Sales'
+                
+                # Top 3 Branded Search Terms
+                branded_st = search_term_df[search_term_df['Is Branded'] == True]
+                if not branded_st.empty and 'Search Term' in branded_st.columns:
+                    b_st_agg = branded_st.groupby('Search Term').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    b_st_agg['ROAS'] = b_st_agg[sales_col] / b_st_agg['Spend'].replace(0, np.nan)
+                    top_3_b_st = b_st_agg.nlargest(3, sales_col)
+                    if len(top_3_b_st) > 0 and top_3_b_st[sales_col].sum() > 0:
+                        items = [f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r[sales_col]:,.0f} ad sales, {r['ROAS']:.2f}x ROAS" if pd.notna(r['ROAS']) and r['ROAS'] > 0 else f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_b_st.iterrows()]
+                        top_performers.append(("Top 3 Branded Search Terms", items))
+                
+                # Top 3 Non-Branded Search Terms
+                non_branded_st = search_term_df[search_term_df['Is Branded'] == False]
+                if not non_branded_st.empty and 'Search Term' in non_branded_st.columns:
+                    nb_st_agg = non_branded_st.groupby('Search Term').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    nb_st_agg['ROAS'] = nb_st_agg[sales_col] / nb_st_agg['Spend'].replace(0, np.nan)
+                    top_3_nb_st = nb_st_agg.nlargest(3, sales_col)
+                    if len(top_3_nb_st) > 0 and top_3_nb_st[sales_col].sum() > 0:
+                        items = [f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r[sales_col]:,.0f} ad sales, {r['ROAS']:.2f}x ROAS" if pd.notna(r['ROAS']) and r['ROAS'] > 0 else f"<strong>{truncate_str(r['Search Term'],40)}</strong> — ${r[sales_col]:,.0f} ad sales" for _,r in top_3_nb_st.iterrows()]
+                        top_performers.append(("Top 3 Non-Branded Search Terms", items))
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Branded/Non-Branded search terms error: {e}")
+        
+        # --- Additional Performance Insights ---
+        try:
+            # CPA (Cost Per Acquisition) and AOV (Average Order Value)
+            campaign_df = get_campaign_performance_data(bulk_data, client_config)
+            if campaign_df is not None and not campaign_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Orders']:
+                    if col in campaign_df.columns:
+                        campaign_df[col] = pd.to_numeric(campaign_df[col], errors='coerce').fillna(0)
+                
+                total_spend = campaign_df['Spend'].sum() if 'Spend' in campaign_df.columns else 0
+                total_orders = campaign_df['Orders'].sum() if 'Orders' in campaign_df.columns else 0
+                sales_col = 'Ad Sales' if 'Ad Sales' in campaign_df.columns else 'Sales'
+                total_sales = campaign_df[sales_col].sum() if sales_col in campaign_df.columns else 0
+                
+                # CPA
+                if total_spend > 0 and total_orders > 0:
+                    cpa = total_spend / total_orders
+                    efficiency_insights.append(f"Cost Per Acquisition (CPA): **\\${cpa:.2f}**")
+                
+                # AOV
+                if total_sales > 0 and total_orders > 0:
+                    aov = total_sales / total_orders
+                    efficiency_insights.append(f"Average Order Value (AOV): **\\${aov:.2f}**")
+                
+                # Match Type Performance
+                if 'Match Type' in campaign_df.columns:
+                    match_agg = campaign_df.groupby('Match Type').agg({
+                        'Spend': 'sum', sales_col: 'sum', 'Clicks': 'sum', 'Orders': 'sum'
+                    }).reset_index()
+                    match_agg['ROAS'] = match_agg[sales_col] / match_agg['Spend'].replace(0, np.nan)
+                    match_agg['CVR'] = (match_agg['Orders'] / match_agg['Clicks'].replace(0, np.nan)) * 100
+                    match_agg = match_agg[match_agg['Spend'] > 0].sort_values('ROAS', ascending=False)
+                    
+                    if len(match_agg) > 1:
+                        best_match = match_agg.iloc[0]
+                        worst_match = match_agg.iloc[-1]
+                        if pd.notna(best_match['ROAS']) and pd.notna(worst_match['ROAS']):
+                            efficiency_insights.append(f"Best match type: **{best_match['Match Type']}** ({best_match['ROAS']:.2f}x ROAS)")
+                            if worst_match['ROAS'] < best_match['ROAS']:
+                                opportunity_insights.append(f"Lowest ROAS match type: **{worst_match['Match Type']}** ({worst_match['ROAS']:.2f}x) - review targeting")
+                
+                # Ad Type Performance
+                if 'Product' in campaign_df.columns and 'Clicks' in campaign_df.columns and 'Impressions' in campaign_df.columns:
+                    ad_type_agg = campaign_df.groupby('Product').agg({
+                        'Spend': 'sum', sales_col: 'sum', 'Clicks': 'sum', 'Impressions': 'sum', 'Orders': 'sum'
+                    }).reset_index()
+                    ad_type_agg['ROAS'] = ad_type_agg[sales_col] / ad_type_agg['Spend'].replace(0, np.nan)
+                    ad_type_agg['CTR'] = (ad_type_agg['Clicks'] / ad_type_agg['Impressions'].replace(0, np.nan)) * 100
+                    ad_type_agg = ad_type_agg[ad_type_agg['Spend'] > 0]
+                    
+                    if len(ad_type_agg) > 0:
+                        for _, row in ad_type_agg.iterrows():
+                            if pd.notna(row['ROAS']) and pd.notna(row['CTR']):
+                                spend_pct = (row['Spend'] / total_spend * 100) if total_spend > 0 else 0
+                                efficiency_insights.append(f"{row['Product']}: **{row['ROAS']:.2f}x ROAS**, {row['CTR']:.2f}% CTR ({spend_pct:.0f}% of spend)")
+                
+                # Campaigns with high impressions but low CTR (opportunity)
+                if 'Campaign Name' in campaign_df.columns and 'Impressions' in campaign_df.columns and 'Clicks' in campaign_df.columns:
+                    camp_ctr = campaign_df.groupby('Campaign Name').agg({
+                        'Impressions': 'sum', 'Clicks': 'sum', 'Spend': 'sum'
+                    }).reset_index()
+                    camp_ctr['CTR'] = (camp_ctr['Clicks'] / camp_ctr['Impressions'].replace(0, np.nan)) * 100
+                    low_ctr_camps = camp_ctr[(camp_ctr['Impressions'] > 10000) & (camp_ctr['CTR'] < 0.2)]
+                    if len(low_ctr_camps) > 0:
+                        low_ctr_count = len(low_ctr_camps)
+                        low_ctr_impressions = low_ctr_camps['Impressions'].sum()
+                        opportunity_insights.append(f"**{low_ctr_count}** campaigns have CTR < 0.2% ({low_ctr_impressions:,.0f} impressions) - improve ad copy/targeting")
+                
+                # High converting campaigns (CVR > 10%)
+                if 'Campaign Name' in campaign_df.columns and 'Orders' in campaign_df.columns and 'Clicks' in campaign_df.columns:
+                    camp_cvr = campaign_df.groupby('Campaign Name').agg({
+                        'Orders': 'sum', 'Clicks': 'sum', sales_col: 'sum', 'Spend': 'sum'
+                    }).reset_index()
+                    camp_cvr['CVR'] = (camp_cvr['Orders'] / camp_cvr['Clicks'].replace(0, np.nan)) * 100
+                    high_cvr_camps = camp_cvr[(camp_cvr['Clicks'] > 100) & (camp_cvr['CVR'] > 10)]
+                    if len(high_cvr_camps) > 0:
+                        high_cvr_count = len(high_cvr_camps)
+                        high_cvr_sales = high_cvr_camps[sales_col].sum()
+                        efficiency_insights.append(f"**{high_cvr_count}** campaigns have CVR > 10% (\\${high_cvr_sales:,.0f} ad sales) - scale these winners")
+                
+                # Zero-sales campaigns with spend
+                if 'Campaign Name' in campaign_df.columns:
+                    camp_sales = campaign_df.groupby('Campaign Name').agg({
+                        'Spend': 'sum', sales_col: 'sum'
+                    }).reset_index()
+                    zero_sales_camps = camp_sales[(camp_sales['Spend'] > 50) & (camp_sales[sales_col] == 0)]
+                    if len(zero_sales_camps) > 0:
+                        zero_sales_spend = zero_sales_camps['Spend'].sum()
+                        zero_sales_count = len(zero_sales_camps)
+                        opportunity_insights.append(f"**\\${zero_sales_spend:,.0f}** spent on **{zero_sales_count}** campaigns with \\$0 sales - pause or optimize")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Additional metrics error: {e}")
+        
+        # --- Keyword/Target Level Insights ---
+        try:
+            search_term_df = get_search_term_data(bulk_data, client_config)
+            if search_term_df is not None and not search_term_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Orders', 'Clicks']:
+                    if col in search_term_df.columns:
+                        search_term_df[col] = pd.to_numeric(search_term_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in search_term_df.columns else 'Sales'
+                
+                # Single-word vs multi-word search terms
+                if 'Search Term' in search_term_df.columns:
+                    search_term_df['Word Count'] = search_term_df['Search Term'].str.split().str.len()
+                    single_word = search_term_df[search_term_df['Word Count'] == 1]
+                    multi_word = search_term_df[search_term_df['Word Count'] > 1]
+                    long_tail = search_term_df[search_term_df['Word Count'] >= 4]
+                    
+                    if len(single_word) > 0 and len(multi_word) > 0:
+                        single_roas = single_word[sales_col].sum() / single_word['Spend'].sum() if single_word['Spend'].sum() > 0 else 0
+                        multi_roas = multi_word[sales_col].sum() / multi_word['Spend'].sum() if multi_word['Spend'].sum() > 0 else 0
+                        if single_roas > 0 and multi_roas > 0:
+                            structure_insights.append(f"Single-word terms: **{single_roas:.2f}x ROAS** vs Multi-word: **{multi_roas:.2f}x ROAS**")
+                    
+                    if len(long_tail) > 0:
+                        long_tail_sales = long_tail[sales_col].sum()
+                        long_tail_spend = long_tail['Spend'].sum()
+                        long_tail_roas = long_tail_sales / long_tail_spend if long_tail_spend > 0 else 0
+                        if long_tail_roas > 0:
+                            structure_insights.append(f"Long-tail keywords (4+ words): **{len(long_tail):,}** terms, **{long_tail_roas:.2f}x ROAS**")
+                
+                # High-click, no-order keywords (negative keyword candidates)
+                if 'Clicks' in search_term_df.columns and 'Orders' in search_term_df.columns:
+                    neg_candidates = search_term_df[(search_term_df['Clicks'] >= 20) & (search_term_df['Orders'] == 0)]
+                    if len(neg_candidates) > 0:
+                        neg_spend = neg_candidates['Spend'].sum() if 'Spend' in neg_candidates.columns else 0
+                        neg_count = len(neg_candidates)
+                        opportunity_insights.append(f"**{neg_count}** search terms have 20+ clicks but 0 orders (\\${neg_spend:,.0f} spend) - negative keyword candidates")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Keyword insights error: {e}")
+        
+        # --- Wasted Spend Insights ---
+        try:
+            branded_targets_df = st.session_state.get('branded_targets_df', pd.DataFrame())
+            non_branded_targets_df = st.session_state.get('non_branded_targets_df', pd.DataFrame())
+            all_targets_df = pd.concat([branded_targets_df, non_branded_targets_df], ignore_index=True) if not (branded_targets_df.empty and non_branded_targets_df.empty) else pd.DataFrame()
+            
+            if not all_targets_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'ROAS']:
+                    if col in all_targets_df.columns:
+                        all_targets_df[col] = pd.to_numeric(all_targets_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in all_targets_df.columns else 'Sales'
+                
+                # Targets with spend but no sales (wasted)
+                wasted_targets = all_targets_df[(all_targets_df['Spend'] > 30) & (all_targets_df[sales_col] == 0)]
+                if len(wasted_targets) > 0:
+                    wasted_spend = wasted_targets['Spend'].sum()
+                    wasted_count = len(wasted_targets)
+                    opportunity_insights.append(f"**Wasted Spend:** \\${wasted_spend:,.0f} on **{wasted_count}** targets with \\$0 sales")
+                
+                # Targets with ROAS < 0.5 (poor performers)
+                if 'ROAS' in all_targets_df.columns:
+                    poor_roas = all_targets_df[(all_targets_df['Spend'] > 50) & (all_targets_df['ROAS'] > 0) & (all_targets_df['ROAS'] < 0.5)]
+                    if len(poor_roas) > 0:
+                        poor_spend = poor_roas['Spend'].sum()
+                        poor_count = len(poor_roas)
+                        opportunity_insights.append(f"**{poor_count}** targets have ROAS < 0.5 (\\${poor_spend:,.0f} spend) - reduce bids or pause")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Wasted spend error: {e}")
+        
+        # --- Contradicting Targets Insights ---
+        try:
+            if 'bulk_data' in st.session_state and 'client_config' in st.session_state:
+                search_term_df = get_search_term_data(st.session_state.bulk_data, st.session_state.client_config)
+                branded_targets_df, non_branded_targets_df = get_targeting_performance_data(st.session_state.bulk_data, st.session_state.client_config)
+                
+                if not search_term_df.empty and (not branded_targets_df.empty or not non_branded_targets_df.empty):
+                    # Build target classification map
+                    target_classification = {}
+                    if not branded_targets_df.empty and 'Target' in branded_targets_df.columns:
+                        for target in branded_targets_df['Target'].dropna().unique():
+                            target_classification[str(target).lower()] = "Branded"
+                    if not non_branded_targets_df.empty and 'Target' in non_branded_targets_df.columns:
+                        for target in non_branded_targets_df['Target'].dropna().unique():
+                            target_classification[str(target).lower()] = "Non-Branded"
+                    
+                    # Check for contradictions
+                    if 'Is_Branded' in search_term_df.columns and 'Target' in search_term_df.columns:
+                        search_term_df['Target Classification'] = search_term_df['Target'].apply(
+                            lambda x: target_classification.get(str(x).lower(), "Unknown") if pd.notna(x) else "Unknown"
+                        )
+                        search_term_df['Search Term Classification'] = search_term_df['Is_Branded'].apply(
+                            lambda x: "Branded" if x else "Non-Branded"
+                        )
+                        
+                        contradictions = search_term_df[
+                            (search_term_df['Search Term Classification'] != search_term_df['Target Classification']) & 
+                            (search_term_df['Target Classification'] != "Unknown")
+                        ]
+                        
+                        if len(contradictions) > 0:
+                            for col in ['Spend', 'Sales']:
+                                if col in contradictions.columns:
+                                    contradictions[col] = pd.to_numeric(contradictions[col], errors='coerce').fillna(0)
+                            
+                            contra_spend = contradictions['Spend'].sum() if 'Spend' in contradictions.columns else 0
+                            contra_count = len(contradictions)
+                            opportunity_insights.append(f"**{contra_count}** contradicting target/search term pairs (\\${contra_spend:,.0f} spend) - review targeting strategy")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Contradicting targets error: {e}")
+        
+        # --- ACoS Distribution Insights ---
+        try:
+            all_targets_df = st.session_state.get('all_targets_df', pd.DataFrame())
+            if not all_targets_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'ACoS']:
+                    if col in all_targets_df.columns:
+                        all_targets_df[col] = pd.to_numeric(all_targets_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in all_targets_df.columns else 'Sales'
+                total_spend = all_targets_df['Spend'].sum()
+                
+                if 'ACoS' in all_targets_df.columns and total_spend > 0:
+                    # Targets with ACoS > 100%
+                    high_acos = all_targets_df[(all_targets_df['ACoS'] > 100) & (all_targets_df['Spend'] > 0)]
+                    if len(high_acos) > 0:
+                        high_acos_spend = high_acos['Spend'].sum()
+                        high_acos_pct = (high_acos_spend / total_spend) * 100
+                        opportunity_insights.append(f"**{len(high_acos)}** targets have ACoS > 100% (\\${high_acos_spend:,.0f}, {high_acos_pct:.1f}% of spend)")
+                    
+                    # Targets with excellent ACoS (< 20%)
+                    excellent_acos = all_targets_df[(all_targets_df['ACoS'] > 0) & (all_targets_df['ACoS'] < 20) & (all_targets_df['Spend'] > 0)]
+                    if len(excellent_acos) > 0:
+                        excellent_spend = excellent_acos['Spend'].sum()
+                        excellent_sales = excellent_acos[sales_col].sum()
+                        efficiency_insights.append(f"**{len(excellent_acos)}** targets have ACoS < 20% (\\${excellent_sales:,.0f} ad sales) - scale these")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] ACoS distribution error: {e}")
+        
+        # --- Tactic/Match Type Performance Insights ---
+        try:
+            branded_targets_df = st.session_state.get('branded_targets_df', pd.DataFrame())
+            non_branded_targets_df = st.session_state.get('non_branded_targets_df', pd.DataFrame())
+            all_df = pd.concat([branded_targets_df, non_branded_targets_df], ignore_index=True) if not (branded_targets_df.empty and non_branded_targets_df.empty) else pd.DataFrame()
+            
+            match_type_col = 'Match Type' if 'Match Type' in all_df.columns else 'Target Type'
+            
+            if not all_df.empty and match_type_col in all_df.columns:
+                for col in ['Spend', 'Ad Sales', 'Sales']:
+                    if col in all_df.columns:
+                        all_df[col] = pd.to_numeric(all_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in all_df.columns else 'Sales'
+                
+                # Aggregate by match type
+                mt_agg = all_df.groupby(match_type_col).agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                mt_agg['ROAS'] = mt_agg[sales_col] / mt_agg['Spend'].replace(0, np.nan)
+                mt_agg = mt_agg[mt_agg['Spend'] > 0].sort_values('ROAS', ascending=False)
+                
+                if len(mt_agg) > 1:
+                    best_mt = mt_agg.iloc[0]
+                    worst_mt = mt_agg.iloc[-1]
+                    total_spend = mt_agg['Spend'].sum()
+                    
+                    if pd.notna(best_mt['ROAS']) and best_mt['ROAS'] > 0:
+                        best_pct = (best_mt['Spend'] / total_spend) * 100
+                        efficiency_insights.append(f"Best tactic: **{best_mt[match_type_col]}** ({best_mt['ROAS']:.2f}x ROAS, {best_pct:.0f}% of spend)")
+                    
+                    if pd.notna(worst_mt['ROAS']) and worst_mt['ROAS'] < best_mt['ROAS']:
+                        worst_pct = (worst_mt['Spend'] / total_spend) * 100
+                        if worst_mt['ROAS'] < 1 and worst_mt['Spend'] >= 40:
+                            opportunity_insights.append(f"Underperforming tactic: **{worst_mt[match_type_col]}** ({worst_mt['ROAS']:.2f}x ROAS, {worst_pct:.0f}% of spend)")
+                
+                # Auto vs Manual comparison (use total_spend from mt_agg for consistent denominator)
+                auto_df = all_df[all_df[match_type_col].str.lower() == 'auto']
+                manual_df = all_df[all_df[match_type_col].str.lower() != 'auto']
+                
+                if not auto_df.empty and not manual_df.empty:
+                    auto_spend = auto_df['Spend'].sum()
+                    auto_sales = auto_df[sales_col].sum()
+                    manual_spend = manual_df['Spend'].sum()
+                    manual_sales = manual_df[sales_col].sum()
+                    
+                    if auto_spend > 0 and manual_spend > 0:
+                        auto_roas = auto_sales / auto_spend
+                        manual_roas = manual_sales / manual_spend
+                        # Use total_spend (all match types) for consistent percentage with match type breakdown
+                        auto_pct = (auto_spend / total_spend) * 100
+                        manual_pct = (manual_spend / total_spend) * 100
+                        structure_insights.append(f"Auto targeting: **{auto_roas:.2f}x ROAS** ({auto_pct:.0f}% of spend) vs Manual: **{manual_roas:.2f}x ROAS** ({manual_pct:.0f}% of spend)")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Tactic performance error: {e}")
+        
+        # --- Placement Performance Insights ---
+        try:
+            if 'bulk_data' in st.session_state and st.session_state.bulk_data is not None:
+                placement_data = pd.DataFrame()
+                
+                for sheet_name, df in st.session_state.bulk_data.items():
+                    if isinstance(df, pd.DataFrame) and not df.empty:
+                        if 'Bidding Adjustment' in df.columns or 'Placement' in df.columns:
+                            placement_data = pd.concat([placement_data, df], ignore_index=True)
+                
+                if not placement_data.empty and 'Placement' in placement_data.columns:
+                    for col in ['Spend', 'Ad Sales', 'Sales', 'Clicks', 'Impressions']:
+                        if col in placement_data.columns:
+                            placement_data[col] = pd.to_numeric(placement_data[col], errors='coerce').fillna(0)
+                    
+                    sales_col = 'Ad Sales' if 'Ad Sales' in placement_data.columns else 'Sales'
+                    
+                    # Aggregate by placement
+                    place_agg = placement_data.groupby('Placement').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    place_agg['ROAS'] = place_agg[sales_col] / place_agg['Spend'].replace(0, np.nan)
+                    place_agg = place_agg[place_agg['Spend'] > 0].sort_values('ROAS', ascending=False)
+                    
+                    if len(place_agg) > 1:
+                        best_place = place_agg.iloc[0]
+                        worst_place = place_agg.iloc[-1]
+                        
+                        if pd.notna(best_place['ROAS']) and best_place['ROAS'] > 0:
+                            efficiency_insights.append(f"Best placement: **{best_place['Placement']}** ({best_place['ROAS']:.2f}x ROAS)")
+                        
+                        if pd.notna(worst_place['ROAS']) and worst_place['ROAS'] < 1 and worst_place['ROAS'] < best_place['ROAS'] and worst_place['Spend'] >= 40:
+                            opportunity_insights.append(f"Underperforming placement: **{worst_place['Placement']}** ({worst_place['ROAS']:.2f}x ROAS) - reduce bid adjustment")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Placement performance error: {e}")
+        
+        # --- Product Group Performance Insights ---
+        try:
+            asin_perf_df = st.session_state.get('asin_perf_df')
+            if asin_perf_df is not None and not asin_perf_df.empty and 'Product Group' in asin_perf_df.columns:
+                pg_df = asin_perf_df.copy()
+                for col in ['Spend', 'Total Sales', 'Ad Sales']:
+                    if col in pg_df.columns:
+                        pg_df[col] = pd.to_numeric(pg_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Total Sales' if 'Total Sales' in pg_df.columns else ('Ad Sales' if 'Ad Sales' in pg_df.columns else None)
+                
+                if sales_col:
+                    # Aggregate by product group
+                    pg_agg = pg_df.groupby('Product Group').agg({'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    pg_agg['ROAS'] = pg_agg[sales_col] / pg_agg['Spend'].replace(0, np.nan)
+                    pg_agg = pg_agg[pg_agg['Spend'] > 0].sort_values(sales_col, ascending=False)
+                    
+                    # Filter out empty/nan product groups
+                    pg_agg = pg_agg[pg_agg['Product Group'].notna() & (pg_agg['Product Group'].astype(str).str.strip() != '')]
+                    
+                    if len(pg_agg) > 0:
+                        structure_insights.append(f"**{len(pg_agg)}** product groups with ad spend")
+                        
+                        # Top product group
+                        top_pg = pg_agg.iloc[0]
+                        if pd.notna(top_pg['ROAS']):
+                            spend_insights.append(f"Top product group: **{truncate_str(top_pg['Product Group'], 30)}** (\\${top_pg[sales_col]:,.0f} sales, {top_pg['ROAS']:.2f}x ROAS)")
+                        
+                        # Worst performing product group (min $40 spend)
+                        worst_pg = pg_agg[(pg_agg['ROAS'] < 1) & (pg_agg['Spend'] >= 40)].sort_values('ROAS').head(1)
+                        if len(worst_pg) > 0:
+                            wpg = worst_pg.iloc[0]
+                            opportunity_insights.append(f"Underperforming group: **{truncate_str(wpg['Product Group'], 30)}** ({wpg['ROAS']:.2f}x ROAS, \\${wpg['Spend']:,.0f} spend)")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Product group error: {e}")
+        
+        # --- Additional Deep Insights ---
+        try:
+            # 1. Spend Efficiency Score (% of spend going to profitable targets)
+            all_targets_df = st.session_state.get('all_targets_df', pd.DataFrame())
+            if not all_targets_df.empty and 'Spend' in all_targets_df.columns:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'ROAS']:
+                    if col in all_targets_df.columns:
+                        all_targets_df[col] = pd.to_numeric(all_targets_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in all_targets_df.columns else 'Sales'
+                total_spend = all_targets_df['Spend'].sum()
+                profitable_spend = all_targets_df[all_targets_df[sales_col] > all_targets_df['Spend']]['Spend'].sum()
+                
+                if total_spend > 0:
+                    efficiency_score = (profitable_spend / total_spend) * 100
+                    efficiency_insights.append(f"Spend Efficiency: **{efficiency_score:.1f}%** of spend goes to profitable targets (ROAS > 1)")
+            
+            # 2. Revenue per Click
+            campaign_df = get_campaign_performance_data(bulk_data, client_config)
+            if campaign_df is not None and not campaign_df.empty:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Clicks', 'Orders']:
+                    if col in campaign_df.columns:
+                        campaign_df[col] = pd.to_numeric(campaign_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in campaign_df.columns else 'Sales'
+                total_clicks = campaign_df['Clicks'].sum()
+                total_sales = campaign_df[sales_col].sum()
+                total_orders = campaign_df['Orders'].sum()
+                
+                if total_clicks > 0 and total_sales > 0:
+                    rpc = total_sales / total_clicks
+                    efficiency_insights.append(f"Revenue per Click: **${rpc:.2f}**")
+                
+                # 3. Click-to-Order Ratio
+                if total_clicks > 0 and total_orders > 0:
+                    clicks_per_order = total_clicks / total_orders
+                    efficiency_insights.append(f"Clicks per Order: **{clicks_per_order:.1f}** clicks needed per conversion")
+            
+            # 4. Top performing match type breakdown with spend allocation
+            search_term_df = get_search_term_data(bulk_data, client_config)
+            if search_term_df is not None and not search_term_df.empty and 'Match Type' in search_term_df.columns:
+                for col in ['Spend', 'Ad Sales', 'Sales', 'Orders']:
+                    if col in search_term_df.columns:
+                        search_term_df[col] = pd.to_numeric(search_term_df[col], errors='coerce').fillna(0)
+                
+                sales_col = 'Ad Sales' if 'Ad Sales' in search_term_df.columns else 'Sales'
+                mt_agg = search_term_df.groupby('Match Type').agg({'Spend': 'sum', sales_col: 'sum', 'Orders': 'sum'}).reset_index()
+                mt_agg['ROAS'] = mt_agg[sales_col] / mt_agg['Spend'].replace(0, np.nan)
+                mt_agg['CVR'] = (mt_agg['Orders'] / mt_agg['Spend'].replace(0, np.nan)) * 100
+                mt_agg = mt_agg[mt_agg['Spend'] > 0].sort_values('Spend', ascending=False)
+                
+                if len(mt_agg) >= 2:
+                    total_mt_spend = mt_agg['Spend'].sum()
+                    # Show top 3 match types by spend
+                    for _, row in mt_agg.head(3).iterrows():
+                        pct = (row['Spend'] / total_mt_spend) * 100
+                        if pd.notna(row['ROAS']):
+                            structure_insights.append(f"**{row['Match Type']}**: {row['ROAS']:.2f}x ROAS, {pct:.0f}% of spend, ${row[sales_col]:,.0f} sales")
+            
+            # 5. Impression Share Opportunity (high CTR but low impressions)
+            if campaign_df is not None and 'Campaign Name' in campaign_df.columns:
+                camp_metrics = campaign_df.groupby('Campaign Name').agg({
+                    'Impressions': 'sum', 'Clicks': 'sum', 'Spend': 'sum', sales_col: 'sum'
+                }).reset_index()
+                camp_metrics['CTR'] = (camp_metrics['Clicks'] / camp_metrics['Impressions'].replace(0, np.nan)) * 100
+                camp_metrics['ROAS'] = camp_metrics[sales_col] / camp_metrics['Spend'].replace(0, np.nan)
+                
+                # High CTR (>0.5%) and good ROAS (>2) but low impressions (bottom 50%)
+                median_impressions = camp_metrics['Impressions'].median()
+                scale_candidates = camp_metrics[
+                    (camp_metrics['CTR'] > 0.5) & 
+                    (camp_metrics['ROAS'] > 2) & 
+                    (camp_metrics['Impressions'] < median_impressions) &
+                    (camp_metrics['Impressions'] > 0)
+                ]
+                if len(scale_candidates) > 0:
+                    opportunity_insights.append(f"**{len(scale_candidates)}** campaigns have high CTR & ROAS but low impressions - increase bids to scale")
+            
+            # 6. Day-parting opportunity (if time data available)
+            # 7. Branded defense ratio
+            if 'Is Branded' in search_term_df.columns if search_term_df is not None else False:
+                branded_orders = search_term_df[search_term_df['Is Branded'] == True]['Orders'].sum() if 'Orders' in search_term_df.columns else 0
+                total_orders = search_term_df['Orders'].sum() if 'Orders' in search_term_df.columns else 0
+                if total_orders > 0 and branded_orders > 0:
+                    branded_order_pct = (branded_orders / total_orders) * 100
+                    structure_insights.append(f"**{branded_order_pct:.0f}%** of orders come from branded search terms")
+            
+            # 8. New-to-brand opportunity (non-branded with high CVR)
+            if search_term_df is not None and 'Is Branded' in search_term_df.columns:
+                nb_st = search_term_df[search_term_df['Is Branded'] == False]
+                if not nb_st.empty and 'Clicks' in nb_st.columns and 'Orders' in nb_st.columns:
+                    nb_st_agg = nb_st.groupby('Search Term').agg({'Clicks': 'sum', 'Orders': 'sum', 'Spend': 'sum', sales_col: 'sum'}).reset_index()
+                    nb_st_agg['CVR'] = (nb_st_agg['Orders'] / nb_st_agg['Clicks'].replace(0, np.nan)) * 100
+                    high_cvr_nb = nb_st_agg[(nb_st_agg['CVR'] > 5) & (nb_st_agg['Clicks'] >= 20)]
+                    if len(high_cvr_nb) > 0:
+                        high_cvr_sales = high_cvr_nb[sales_col].sum()
+                        efficiency_insights.append(f"**{len(high_cvr_nb)}** non-branded terms have CVR > 5% (${high_cvr_sales:,.0f} sales) - new customer acquisition winners")
+            
+            # 9. Bid optimization opportunities (CPC vs ROAS correlation)
+            if search_term_df is not None and 'Spend' in search_term_df.columns and 'Clicks' in search_term_df.columns:
+                st_agg = search_term_df.groupby('Search Term').agg({'Spend': 'sum', 'Clicks': 'sum', sales_col: 'sum'}).reset_index()
+                st_agg['CPC'] = st_agg['Spend'] / st_agg['Clicks'].replace(0, np.nan)
+                st_agg['ROAS'] = st_agg[sales_col] / st_agg['Spend'].replace(0, np.nan)
+                
+                # High CPC (>$2) with good ROAS (>3) - can afford higher bids
+                high_value = st_agg[(st_agg['CPC'] > 2) & (st_agg['ROAS'] > 3) & (st_agg['Spend'] > 50)]
+                if len(high_value) > 0:
+                    efficiency_insights.append(f"**{len(high_value)}** high-value terms (CPC > $2, ROAS > 3x) - maintain or increase bids")
+                
+            
+            # 10. Portfolio concentration risk
+            if campaign_df is not None and 'Campaign Name' in campaign_df.columns:
+                camp_sales = campaign_df.groupby('Campaign Name')[sales_col].sum().sort_values(ascending=False)
+                if len(camp_sales) > 0:
+                    total_sales = camp_sales.sum()
+                    top_camp_sales = camp_sales.iloc[0] if len(camp_sales) > 0 else 0
+                    top_3_sales = camp_sales.head(3).sum() if len(camp_sales) >= 3 else camp_sales.sum()
+                    
+                    if total_sales > 0:
+                        top_camp_pct = (top_camp_sales / total_sales) * 100
+                        top_3_pct = (top_3_sales / total_sales) * 100
+                        
+                        if top_camp_pct > 40:
+                            opportunity_insights.append(f"**Concentration Risk:** Top campaign drives {top_camp_pct:.0f}% of sales - diversify for stability")
+                        elif top_3_pct > 70:
+                            structure_insights.append(f"Top 3 campaigns drive **{top_3_pct:.0f}%** of ad sales")
+        except Exception as e:
+            st.session_state.debug_messages.append(f"[Insights] Additional deep insights error: {e}")
+        
+        # === DISPLAY ALL INSIGHTS IN ORGANIZED SECTIONS ===
+        has_content = any([spend_insights, efficiency_insights, top_performers, opportunity_insights, structure_insights])
+        
+        if has_content:
+            # Always use cards with bullets
+            use_cards = True
+            
+            # Helper function to convert markdown bold to HTML and fix escapes
+            def format_for_html(text):
+                import re
+                # Remove backslash escapes before $ signs
+                text = text.replace("\\$", "$")
+                # Convert **text** to <strong>text</strong>
+                text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+                return text
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Performance Metrics - compute in specific order
+                st.markdown("### <span style='color: #4CAF50;'>Performance Metrics</span>", unsafe_allow_html=True)
+                
+                # Get campaign data for metrics
+                try:
+                    campaign_df = get_campaign_performance_data(bulk_data, client_config)
+                    if campaign_df is not None and not campaign_df.empty:
+                        for col in ['Spend', 'Ad Sales', 'Sales', 'Clicks', 'Impressions', 'Orders']:
+                            if col in campaign_df.columns:
+                                campaign_df[col] = pd.to_numeric(campaign_df[col], errors='coerce').fillna(0)
+                        
+                        sales_col = 'Ad Sales' if 'Ad Sales' in campaign_df.columns else 'Sales'
+                        total_spend = campaign_df['Spend'].sum() if 'Spend' in campaign_df.columns else 0
+                        total_sales = campaign_df[sales_col].sum() if sales_col in campaign_df.columns else 0
+                        total_clicks = campaign_df['Clicks'].sum() if 'Clicks' in campaign_df.columns else 0
+                        total_impressions = campaign_df['Impressions'].sum() if 'Impressions' in campaign_df.columns else 0
+                        total_orders = campaign_df['Orders'].sum() if 'Orders' in campaign_df.columns else 0
+                        
+                        # Calculate metrics
+                        acos = (total_spend / total_sales * 100) if total_sales > 0 else 0
+                        roas = (total_sales / total_spend) if total_spend > 0 else 0
+                        cpc = (total_spend / total_clicks) if total_clicks > 0 else 0
+                        cvr = (total_orders / total_clicks * 100) if total_clicks > 0 else 0
+                        aov = (total_sales / total_orders) if total_orders > 0 else 0
+                        cpa = (total_spend / total_orders) if total_orders > 0 else 0
+                        
+                        if use_cards:
+                            metrics_html = ""
+                            if total_spend > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>Spend:</strong> ${total_spend:,.0f}</div>"
+                            if total_sales > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>Ad Sales:</strong> ${total_sales:,.0f}</div>"
+                            if acos > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>ACoS:</strong> {acos:.1f}%</div>"
+                            if roas > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>ROAS:</strong> {roas:.2f}x</div>"
+                            if cpc > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>CPC:</strong> ${cpc:.2f}</div>"
+                            if cvr > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>CVR:</strong> {cvr:.2f}%</div>"
+                            if total_clicks > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>Clicks:</strong> {int(total_clicks):,}</div>"
+                            if total_orders > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>Orders:</strong> {int(total_orders):,}</div>"
+                            if aov > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>AOV:</strong> ${aov:.2f}</div>"
+                            if cpa > 0:
+                                metrics_html += f"<div style='margin-bottom: 4px;'>• <strong>CPA:</strong> ${cpa:.2f}</div>"
+                            
+                            st.markdown(f"""
+                            <div style='background: linear-gradient(135deg, rgba(76,175,80,0.08) 0%, rgba(76,175,80,0.02) 100%); 
+                                        border-left: 3px solid #4CAF50; 
+                                        padding: 12px 16px; 
+                                        margin-bottom: 10px; 
+                                        border-radius: 0 6px 6px 0;
+                                        color: #E0E0E0;'>
+                                {metrics_html}
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            if total_spend > 0:
+                                st.markdown(f"- Spend: **${total_spend:,.0f}**")
+                            if total_sales > 0:
+                                st.markdown(f"- Ad Sales: **${total_sales:,.0f}**")
+                            if acos > 0:
+                                st.markdown(f"- ACoS: **{acos:.1f}%**")
+                            if roas > 0:
+                                st.markdown(f"- ROAS: **{roas:.2f}x**")
+                            if cpc > 0:
+                                st.markdown(f"- CPC: **${cpc:.2f}**")
+                            if cvr > 0:
+                                st.markdown(f"- CVR: **{cvr:.2f}%**")
+                            if total_clicks > 0:
+                                st.markdown(f"- Clicks: **{int(total_clicks):,}**")
+                            if total_orders > 0:
+                                st.markdown(f"- Orders: **{int(total_orders):,}**")
+                            if aov > 0:
+                                st.markdown(f"- AOV: **${aov:.2f}**")
+                            if cpa > 0:
+                                st.markdown(f"- CPA: **${cpa:.2f}**")
+                except Exception as e:
+                    st.session_state.debug_messages.append(f"[Insights] Performance metrics error: {e}")
+                
+                # Spend Breakdown
+                if spend_insights:
+                    st.markdown("### <span style='color: #2196F3;'>Spend Breakdown</span>", unsafe_allow_html=True)
+                    if use_cards:
+                        spend_html = "".join([f"<div style='margin-bottom: 4px;'>• {format_for_html(item)}</div>" for item in spend_insights])
+                        st.markdown(f"""
+                        <div style='background: linear-gradient(135deg, rgba(33,150,243,0.08) 0%, rgba(33,150,243,0.02) 100%); 
+                                    border-left: 3px solid #2196F3; 
+                                    padding: 12px 16px; 
+                                    margin-bottom: 10px; 
+                                    border-radius: 0 6px 6px 0;
+                                    color: #E0E0E0;'>
+                            {spend_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        for item in spend_insights:
+                            st.markdown(f"- {item}")
+                
+                # Account Structure
+                if structure_insights:
+                    st.markdown("### <span style='color: #9C27B0;'>Account Structure</span>", unsafe_allow_html=True)
+                    if use_cards:
+                        structure_html = "".join([f"<div style='margin-bottom: 4px;'>• {format_for_html(item)}</div>" for item in structure_insights])
+                        st.markdown(f"""
+                        <div style='background: linear-gradient(135deg, rgba(156,39,176,0.08) 0%, rgba(156,39,176,0.02) 100%); 
+                                    border-left: 3px solid #9C27B0; 
+                                    padding: 12px 16px; 
+                                    margin-bottom: 10px; 
+                                    border-radius: 0 6px 6px 0;
+                                    color: #E0E0E0;'>
+                            {structure_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        for item in structure_insights:
+                            st.markdown(f"- {item}")
+            
+            with col2:
+                # Top Performers
+                if top_performers:
+                    st.markdown("### <span style='color: #FF9800;'>Top Performers</span>", unsafe_allow_html=True)
+                    
+                    for title, items in top_performers:
+                        if use_cards:
+                            items_html = "".join([f"<div style='display: flex; align-items: baseline; margin-bottom: 6px;'><span style='color: #FF9800; font-weight: 600; min-width: 18px;'>{i+1}.</span><span style='color: #E0E0E0;'>{format_for_html(item)}</span></div>" for i, item in enumerate(items)])
+                            st.markdown(f"""
+                            <div style='background: linear-gradient(135deg, rgba(255,152,0,0.08) 0%, rgba(255,152,0,0.02) 100%); 
+                                        border-left: 3px solid #FF9800; 
+                                        padding: 12px 16px; 
+                                        margin-bottom: 10px; 
+                                        border-radius: 0 6px 6px 0;'>
+                                <div style='color: #FF9800; font-weight: 600; font-size: 0.85em; margin-bottom: 10px; letter-spacing: 0.5px;'>{title}</div>
+                                {items_html}
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"**{title}**")
+                            for i, item in enumerate(items):
+                                st.markdown(f"{i+1}. {item}")
+                
+                # Opportunities
+                if opportunity_insights:
+                    st.markdown("### <span style='color: #F44336;'>Optimization Opportunities</span>", unsafe_allow_html=True)
+                    if use_cards:
+                        opps_html = "".join([f"<div style='margin-bottom: 4px;'>• {format_for_html(item)}</div>" for item in opportunity_insights])
+                        st.markdown(f"""
+                        <div style='background: linear-gradient(135deg, rgba(244,67,54,0.08) 0%, rgba(244,67,54,0.02) 100%); 
+                                    border-left: 3px solid #F44336; 
+                                    padding: 12px 16px; 
+                                    margin-bottom: 10px; 
+                                    border-radius: 0 6px 6px 0;
+                                    color: #E0E0E0;'>
+                            {opps_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        for item in opportunity_insights:
+                            st.markdown(f"- {item}")
+        else:
+            st.info("Upload advertising data and configure client settings to generate account insights.")
+            
+    except Exception as e:
+        st.warning(f"Unable to generate insights: {str(e)}")
+        if st.session_state.get('global_debug_mode', False):
+            import traceback
+            st.code(traceback.format_exc())
+
+# =============================================================================
+# ACCOUNT STRUCTURE FLOW SECTION - Visualize spend/sales flow across account levels
+# Only show on the Advertising Audit page when data is available
+# =============================================================================
+if st.session_state.get('current_page') == "advertising_audit" and st.session_state.get('bulk_data') is not None:
+    st.markdown("<div id='account-structure-flow' class='section-anchor'></div>", unsafe_allow_html=True)
+    st.markdown("<hr style='height:2px;border-width:0;color:gold;background-color:gold;margin-top:25px;margin-bottom:15px;margin-left:10px;margin-right:10px'>", unsafe_allow_html=True)
+    st.markdown("<span class='main-section-header dashboard-section'>Account Structure Flow</span>", unsafe_allow_html=True)
+    
+    try:
+        bulk_data = st.session_state.bulk_data
+        client_config = st.session_state.get('client_config', {})
+        
+        # Collect data at each level
+        structure_data = {}
+        
+        # Helper function to find column case-insensitively
+        def find_col_ci(df, names):
+            df_cols_lower = {c.lower(): c for c in df.columns}
+            for name in names:
+                if name.lower() in df_cols_lower:
+                    return df_cols_lower[name.lower()]
+            return None
+        
+        # Helper to check if a column value is 'enabled' (case-insensitive)
+        def is_enabled(val):
+            return str(val).strip().lower() == 'enabled' if pd.notna(val) else False
+        
+        # Helper to count enabled entities from bulk data based on Entity type
+        # For Campaigns: State must be enabled
+        # For Ad Groups/Product Ads: State + Campaign State (Informational only) + Ad Group State (Informational only) must all be enabled
+        # For Targets: Row has non-blank Bid value, and State + Campaign State + Ad Group State must all be enabled
+        def count_enabled_from_bulk(bulk_data, entity_type):
+            """
+            entity_type: 'campaign', 'ad group', 'product ad', or 'target' (any row with non-blank Bid value)
+            Returns count of enabled entities and set of enabled campaign names (for campaigns)
+            """
+            enabled_count = 0
+            enabled_names = set()
+            
+            for sheet_name, df in bulk_data.items():
+                if not isinstance(df, pd.DataFrame) or df.empty:
+                    continue
+                if any(x.lower() in sheet_name.lower() for x in ['Portfolio', 'RAS', 'Search Term']):
+                    continue
+                
+                entity_col = find_col_ci(df, ['Entity'])
+                state_col = find_col_ci(df, ['State'])
+                camp_state_col = find_col_ci(df, ['Campaign State (Informational only)', 'Campaign State (Informational Only)', 'Campaign State'])
+                ag_state_col = find_col_ci(df, ['Ad Group State (Informational only)', 'Ad Group State (Informational Only)', 'Ad Group State'])
+                bid_col = find_col_ci(df, ['Bid'])
+                
+                if not state_col:
+                    continue
+                
+                for _, row in df.iterrows():
+                    entity_val = str(row.get(entity_col, '')).strip().lower() if entity_col else ''
+                    
+                    if entity_type == 'campaign' and entity_val == 'campaign':
+                        # Campaign: Only State must be enabled
+                        if is_enabled(row.get(state_col)):
+                            enabled_count += 1
+                            camp_name_col = find_col_ci(df, ['Campaign Name', 'Campaign Name (Informational Only)'])
+                            if camp_name_col:
+                                enabled_names.add(row.get(camp_name_col, ''))
+                    
+                    elif entity_type == 'ad group' and entity_val == 'ad group':
+                        # Ad Group: State + Campaign State + Ad Group State must all be enabled
+                        if is_enabled(row.get(state_col)):
+                            camp_ok = is_enabled(row.get(camp_state_col)) if camp_state_col else True
+                            ag_ok = is_enabled(row.get(ag_state_col)) if ag_state_col else True
+                            if camp_ok and ag_ok:
+                                enabled_count += 1
+                    
+                    elif entity_type == 'product ad' and entity_val == 'product ad':
+                        # Product Ad: State + Campaign State + Ad Group State must all be enabled
+                        if is_enabled(row.get(state_col)):
+                            camp_ok = is_enabled(row.get(camp_state_col)) if camp_state_col else True
+                            ag_ok = is_enabled(row.get(ag_state_col)) if ag_state_col else True
+                            if camp_ok and ag_ok:
+                                enabled_count += 1
+                    
+                    elif entity_type == 'target':
+                        # Target: Any row with non-blank Bid value
+                        # State + Campaign State + Ad Group State must all be enabled
+                        if bid_col:
+                            bid_val = row.get(bid_col)
+                            # Check if Bid is not blank (has any non-empty value)
+                            if pd.notna(bid_val) and str(bid_val).strip():
+                                # Has bid value - check all states
+                                if is_enabled(row.get(state_col)):
+                                    camp_ok = is_enabled(row.get(camp_state_col)) if camp_state_col else True
+                                    ag_ok = is_enabled(row.get(ag_state_col)) if ag_state_col else True
+                                    if camp_ok and ag_ok:
+                                        enabled_count += 1
+            
+            return enabled_count, enabled_names
+        
+        # --- CAMPAIGN LEVEL ---
+        campaign_df = get_campaign_performance_data(bulk_data, client_config)
+        
+        # Count enabled campaigns from bulk data (proper state checking)
+        enabled_campaign_count, enabled_campaigns_set = count_enabled_from_bulk(bulk_data, 'campaign')
+        
+        if campaign_df is not None and not campaign_df.empty:
+            for col in ['Spend', 'Ad Sales', 'Sales', 'Clicks', 'Impressions', 'Orders']:
+                if col in campaign_df.columns:
+                    campaign_df[col] = pd.to_numeric(campaign_df[col], errors='coerce').fillna(0)
+            
+            sales_col = 'Ad Sales' if 'Ad Sales' in campaign_df.columns else 'Sales'
+            
+            # Find campaign name column (case-insensitive) - get_campaign_performance_data returns 'Campaign'
+            campaign_name_col = None
+            for col in campaign_df.columns:
+                if col.lower() == 'campaign' or col.lower() == 'campaign name':
+                    campaign_name_col = col
+                    break
+            
+            if campaign_name_col:
+                # Campaign level aggregation
+                camp_agg = campaign_df.groupby(campaign_name_col).agg({
+                    'Spend': 'sum', sales_col: 'sum', 'Orders': 'sum', 'Clicks': 'sum'
+                }).reset_index()
+                camp_agg['ROAS'] = camp_agg[sales_col] / camp_agg['Spend'].replace(0, np.nan)
+                camp_agg = camp_agg.sort_values('Spend', ascending=False)
+                # Rename to standard column name for display
+                camp_agg = camp_agg.rename(columns={campaign_name_col: 'Campaign Name'})
+                
+                structure_data['campaigns'] = {
+                    'count': len(camp_agg),
+                    'enabled_count': enabled_campaign_count,
+                    'total_spend': camp_agg['Spend'].sum(),
+                    'total_sales': camp_agg[sales_col].sum(),
+                    'total_orders': camp_agg['Orders'].sum(),
+                    'top_5': camp_agg.head(5).to_dict('records'),
+                    'with_spend': len(camp_agg[camp_agg['Spend'] > 0]),
+                    'with_sales': len(camp_agg[camp_agg[sales_col] > 0]),
+                    'without_sales': len(camp_agg[camp_agg[sales_col] == 0]),
+                    'sales_col': sales_col
+                }
+                
+                # Ad Type breakdown - use 'Ad Type' column from get_campaign_performance_data
+                ad_type_col = 'Ad Type' if 'Ad Type' in campaign_df.columns else ('Product' if 'Product' in campaign_df.columns else None)
+                if ad_type_col:
+                    ad_type_agg = campaign_df.groupby(ad_type_col).agg({
+                        'Spend': 'sum', sales_col: 'sum', 'Orders': 'sum'
+                    }).reset_index()
+                    ad_type_agg['ROAS'] = ad_type_agg[sales_col] / ad_type_agg['Spend'].replace(0, np.nan)
+                    ad_type_agg = ad_type_agg.sort_values('Spend', ascending=False)
+                    # Rename to 'Product' for consistency in display
+                    ad_type_agg = ad_type_agg.rename(columns={ad_type_col: 'Product'})
+                    structure_data['ad_types'] = ad_type_agg.to_dict('records')
+        
+        # --- AD GROUP LEVEL ---
+        # Count enabled ad groups from bulk data (proper state checking)
+        enabled_ag_count, _ = count_enabled_from_bulk(bulk_data, 'ad group')
+        
+        ad_group_data = pd.DataFrame()
+        for sheet_name, df in bulk_data.items():
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                continue
+            # Skip Portfolio and RAS sheets
+            if any(x.lower() in sheet_name.lower() for x in ['Portfolio', 'RAS']):
+                continue
+            
+            # Find columns case-insensitively
+            entity_col = find_col_ci(df, ['Entity'])
+            ag_name_col = find_col_ci(df, ['Ad Group Name', 'Ad Group Name (Informational Only)'])
+            
+            if ag_name_col:
+                # Filter for Entity="Ad Group" rows only to avoid double-counting
+                if entity_col:
+                    entity_mask = df[entity_col].fillna('').astype(str).str.strip().str.lower() == 'ad group'
+                    filtered_df = df[entity_mask].copy()
+                else:
+                    filtered_df = df.copy()
+                
+                if not filtered_df.empty:
+                    ad_group_data = pd.concat([ad_group_data, filtered_df], ignore_index=True)
+        
+        if not ad_group_data.empty:
+            # Find columns case-insensitively
+            spend_col = find_col_ci(ad_group_data, ['Spend'])
+            sales_col_name = find_col_ci(ad_group_data, ['Ad Sales', 'Sales'])
+            ag_name_col = find_col_ci(ad_group_data, ['Ad Group Name', 'Ad Group Name (Informational Only)'])
+            
+            if spend_col and sales_col_name and ag_name_col:
+                ad_group_data[spend_col] = pd.to_numeric(ad_group_data[spend_col], errors='coerce').fillna(0)
+                ad_group_data[sales_col_name] = pd.to_numeric(ad_group_data[sales_col_name], errors='coerce').fillna(0)
+                
+                ag_agg = ad_group_data.groupby(ag_name_col).agg({
+                    spend_col: 'sum', sales_col_name: 'sum'
+                }).reset_index()
+                ag_agg['ROAS'] = ag_agg[sales_col_name] / ag_agg[spend_col].replace(0, np.nan)
+                ag_agg = ag_agg.sort_values(spend_col, ascending=False)
+                # Rename columns for consistency
+                ag_agg = ag_agg.rename(columns={ag_name_col: 'Ad Group Name', spend_col: 'Spend', sales_col_name: 'Ad Sales'})
+                
+                structure_data['ad_groups'] = {
+                    'count': len(ag_agg),
+                    'enabled_count': enabled_ag_count,
+                    'total_spend': ag_agg['Spend'].sum(),
+                    'total_sales': ag_agg['Ad Sales'].sum(),
+                    'top_5': ag_agg.head(5).to_dict('records'),
+                    'with_spend': len(ag_agg[ag_agg['Spend'] > 0]),
+                    'with_sales': len(ag_agg[ag_agg['Ad Sales'] > 0]),
+                    'without_sales': len(ag_agg[ag_agg['Ad Sales'] == 0]),
+                    'sales_col': 'Ad Sales'
+                }
+        
+        # --- ADVERTISED PRODUCT (ASIN) LEVEL ---
+        # Count enabled Product Ads from bulk data (Entity = 'Product Ad' with all 3 state columns enabled)
+        enabled_product_ad_count, _ = count_enabled_from_bulk(bulk_data, 'product ad')
+        
+        asin_perf_df = st.session_state.get('asin_perf_df')
+        asin_campaign_data = {}  # Track which campaigns each ASIN appears in
+        
+        if asin_perf_df is not None and not asin_perf_df.empty:
+            asin_df = asin_perf_df.copy()
+            for col in ['Spend', 'Total Sales', 'Ad Sales', 'Orders']:
+                if col in asin_df.columns:
+                    asin_df[col] = pd.to_numeric(asin_df[col], errors='coerce').fillna(0)
+            
+            sales_col = 'Total Sales' if 'Total Sales' in asin_df.columns else ('Ad Sales' if 'Ad Sales' in asin_df.columns else None)
+            
+            # Track ASIN to campaign mapping for insights
+            campaign_col_asin = find_col_ci(asin_df, ['Campaign', 'Campaign Name'])
+            if campaign_col_asin and 'ASIN' in asin_df.columns:
+                for _, row in asin_df.iterrows():
+                    asin = row.get('ASIN', '')
+                    camp = row.get(campaign_col_asin, '')
+                    if asin and camp:
+                        if asin not in asin_campaign_data:
+                            asin_campaign_data[asin] = {'campaigns': set(), 'enabled_campaigns': set()}
+                        asin_campaign_data[asin]['campaigns'].add(camp)
+                        if camp in enabled_campaigns_set:
+                            asin_campaign_data[asin]['enabled_campaigns'].add(camp)
+            
+            if sales_col and 'ASIN' in asin_df.columns:
+                # Check if SKU column exists
+                sku_col = find_col_ci(asin_df, ['SKU', 'Seller SKU', 'Advertised SKU'])
+                
+                agg_dict = {'Spend': 'sum', sales_col: 'sum'}
+                if sku_col:
+                    agg_dict[sku_col] = 'first'  # Take first SKU for each ASIN
+                
+                asin_agg = asin_df.groupby('ASIN').agg(agg_dict).reset_index()
+                asin_agg['ROAS'] = asin_agg[sales_col] / asin_agg['Spend'].replace(0, np.nan)
+                asin_agg = asin_agg.sort_values('Spend', ascending=False)
+                
+                # Rename SKU column if it exists
+                if sku_col and sku_col in asin_agg.columns:
+                    asin_agg = asin_agg.rename(columns={sku_col: 'SKU'})
+                
+                # Get product titles if available
+                branded_asins = client_config.get('branded_asins_data', {})
+                asin_agg['Title'] = asin_agg['ASIN'].apply(
+                    lambda x: branded_asins.get(x, {}).get('product_title', x) if branded_asins else x
+                )
+                
+                structure_data['asins'] = {
+                    'count': len(asin_agg),
+                    'enabled_count': enabled_product_ad_count,  # Use Product Ad count from bulk data
+                    'total_spend': asin_agg['Spend'].sum(),
+                    'total_sales': asin_agg[sales_col].sum(),
+                    'top_5': asin_agg.head(5).to_dict('records'),
+                    'with_spend': len(asin_agg[asin_agg['Spend'] > 0]),
+                    'with_sales': len(asin_agg[asin_agg[sales_col] > 0]),
+                    'without_sales': len(asin_agg[asin_agg[sales_col] == 0]),
+                    'sales_col': sales_col,
+                    'asin_campaign_data': asin_campaign_data,
+                    'asin_agg': asin_agg  # Store for insights
+                }
+        
+        # If no ASIN performance data but we have Product Ads in bulk, still show the count
+        if 'asins' not in structure_data and enabled_product_ad_count > 0:
+            structure_data['asins'] = {
+                'count': enabled_product_ad_count,
+                'enabled_count': enabled_product_ad_count,
+                'total_spend': 0,
+                'total_sales': 0,
+                'top_5': [],
+                'with_spend': 0,
+                'with_sales': 0,
+                'without_sales': 0,
+                'sales_col': 'Ad Sales',
+                'asin_campaign_data': {},
+                'asin_agg': pd.DataFrame()
+            }
+        
+        # --- TARGET LEVEL ---
+        # Count enabled targets from bulk data (any row with non-blank Bid, checking all state columns)
+        enabled_target_count, _ = count_enabled_from_bulk(bulk_data, 'target')
+        campaign_target_counts = {}  # Track enabled targets per campaign
+        campaign_target_details = {}  # Track target details per campaign for insights
+        
+        branded_targets_df, non_branded_targets_df = get_targeting_performance_data(bulk_data, client_config)
+        all_targets = pd.concat([branded_targets_df, non_branded_targets_df], ignore_index=True) if not (branded_targets_df.empty and non_branded_targets_df.empty) else pd.DataFrame()
+        
+        if not all_targets.empty:
+            for col in ['Spend', 'Ad Sales', 'Sales', 'Orders']:
+                if col in all_targets.columns:
+                    all_targets[col] = pd.to_numeric(all_targets[col], errors='coerce').fillna(0)
+            
+            sales_col = 'Ad Sales' if 'Ad Sales' in all_targets.columns else 'Sales'
+            target_col = 'Keyword/Product Targeting' if 'Keyword/Product Targeting' in all_targets.columns else 'Target'
+            campaign_col = 'Campaign' if 'Campaign' in all_targets.columns else None
+            
+            # Build campaign_target_counts and campaign_target_details from enabled targets
+            if campaign_col and 'Is Enabled' in all_targets.columns:
+                enabled_targets_df = all_targets[all_targets['Is Enabled'] == True]
+                for camp_name, camp_group in enabled_targets_df.groupby(campaign_col):
+                    if camp_name in enabled_campaigns_set:  # Only count for enabled campaigns
+                        campaign_target_counts[camp_name] = len(camp_group)
+                        # Store top 5 targets by spend for this campaign
+                        camp_targets = camp_group.sort_values('Spend', ascending=False).head(5)
+                        campaign_target_details[camp_name] = camp_targets[[target_col, 'Spend', sales_col]].to_dict('records')
+            
+            if target_col in all_targets.columns:
+                target_agg = all_targets.groupby(target_col).agg({
+                    'Spend': 'sum', sales_col: 'sum'
+                }).reset_index()
+                target_agg['ROAS'] = target_agg[sales_col] / target_agg['Spend'].replace(0, np.nan)
+                target_agg = target_agg.sort_values('Spend', ascending=False)
+                
+                structure_data['targets'] = {
+                    'count': len(target_agg),
+                    'enabled_count': enabled_target_count,
+                    'total_spend': target_agg['Spend'].sum(),
+                    'total_sales': target_agg[sales_col].sum(),
+                    'top_5': target_agg.head(5).to_dict('records'),
+                    'with_spend': len(target_agg[target_agg['Spend'] > 0]),
+                    'with_sales': len(target_agg[target_agg[sales_col] > 0]),
+                    'without_sales': len(target_agg[target_agg[sales_col] == 0]),
+                    'sales_col': sales_col,
+                    'target_col': target_col,
+                    'campaign_target_counts': campaign_target_counts,
+                    'campaign_target_details': campaign_target_details
+                }
+        
+        # --- SEARCH TERM LEVEL ---
+        search_term_df = get_search_term_data(bulk_data, client_config)
+        if search_term_df is not None and not search_term_df.empty:
+            for col in ['Spend', 'Ad Sales', 'Sales', 'Orders', 'Clicks']:
+                if col in search_term_df.columns:
+                    search_term_df[col] = pd.to_numeric(search_term_df[col], errors='coerce').fillna(0)
+            
+            sales_col = 'Ad Sales' if 'Ad Sales' in search_term_df.columns else 'Sales'
+            
+            st_agg = search_term_df.groupby('Search Term').agg({
+                'Spend': 'sum', sales_col: 'sum', 'Clicks': 'sum'
+            }).reset_index()
+            st_agg['ROAS'] = st_agg[sales_col] / st_agg['Spend'].replace(0, np.nan)
+            st_agg = st_agg.sort_values('Spend', ascending=False)
+            
+            structure_data['search_terms'] = {
+                'count': len(st_agg),
+                'enabled_count': 0,  # Search terms don't have State
+                'total_spend': st_agg['Spend'].sum(),
+                'total_sales': st_agg[sales_col].sum(),
+                'top_5': st_agg.head(5).to_dict('records'),
+                'with_spend': len(st_agg[st_agg['Spend'] > 0]),
+                'with_sales': len(st_agg[st_agg[sales_col] > 0]),
+                'without_sales': len(st_agg[st_agg[sales_col] == 0]),
+                'sales_col': sales_col
+            }
+        
+        # === DISPLAY ACCOUNT STRUCTURE ===
+        if structure_data:
+            # Calculate total account spend/sales for percentages
+            total_account_spend = structure_data.get('campaigns', {}).get('total_spend', 0)
+            total_account_sales = structure_data.get('campaigns', {}).get('total_sales', 0)
+            
+            # --- HIERARCHY OVERVIEW ---
+            st.markdown("### Account Entity Overview")
+            
+            # Create summary table
+            hierarchy_levels = []
+            level_order = ['campaigns', 'ad_groups', 'asins', 'targets', 'search_terms']
+            level_names = {
+                'campaigns': 'Campaigns',
+                'ad_groups': 'Ad Groups', 
+                'asins': 'Advertised Products (ASINs)',
+                'targets': 'Targets (Keywords/Products)',
+                'search_terms': 'Search Terms'
+            }
+            
+            for level in level_order:
+                if level in structure_data:
+                    data = structure_data[level]
+                    enabled = data.get('enabled_count', data['count'])  # Fall back to count if no enabled_count
+                    with_spend = data.get('with_spend', 0)  # Entities with spend > 0
+                    # For search terms, use total count since they don't have State
+                    if level == 'search_terms':
+                        enabled = data['count']
+                    # Calculate Top 5 Spend %
+                    top_5_spend = sum(item.get('Spend', 0) for item in data.get('top_5', []))
+                    top_5_pct = (top_5_spend / data['total_spend'] * 100) if data.get('total_spend', 0) > 0 else 0
+                    hierarchy_levels.append({
+                        'Level': level_names[level],
+                        'Enabled': f"{enabled:,}",
+                        'With Sales': f"{data['with_sales']:,}",
+                        'Without Sales': f"{data['without_sales']:,}",
+                        '% with Spend': f"{(with_spend/enabled*100):.1f}%" if enabled > 0 else "N/A",
+                        '% with Sales': f"{(data['with_sales']/enabled*100):.1f}%" if enabled > 0 else "N/A",
+                        'Top 5 Spend %': f"{top_5_pct:.1f}%"
+                    })
+            
+            if hierarchy_levels:
+                hierarchy_df = pd.DataFrame(hierarchy_levels)
+                st.dataframe(hierarchy_df, use_container_width=True, hide_index=True)
+            
+            # --- AD TYPE BREAKDOWN ---
+            if 'ad_types' in structure_data and structure_data['ad_types']:
+                st.markdown("### Spend and Sales by Ad Type")
+                
+                ad_type_data = structure_data['ad_types']
+                
+                # Create columns for each ad type
+                num_types = len(ad_type_data)
+                if num_types > 0:
+                    cols = st.columns(min(num_types, 4))
+                    
+                    for i, ad_type in enumerate(ad_type_data[:4]):
+                        with cols[i % 4]:
+                            ad_name = ad_type.get('Product', 'Unknown')
+                            spend = ad_type.get('Spend', 0)
+                            sales = ad_type.get(structure_data['campaigns']['sales_col'], 0)
+                            roas = ad_type.get('ROAS', 0)
+                            spend_pct = (spend / total_account_spend * 100) if total_account_spend > 0 else 0
+                            sales_pct = (sales / total_account_sales * 100) if total_account_sales > 0 else 0
+                            
+                            st.markdown(f"**{ad_name}**")
+                            st.markdown(f"Spend: **${spend:,.0f}** ({spend_pct:.1f}%)")
+                            st.markdown(f"Sales: **${sales:,.0f}** ({sales_pct:.1f}%)")
+                            if pd.notna(roas) and roas > 0:
+                                roas_color = "#4CAF50" if roas >= 3 else ("#FF9800" if roas >= 1 else "#F44336")
+                                st.markdown(f"ROAS: <span style='color:{roas_color};font-weight:bold;'>{roas:.2f}x</span>", unsafe_allow_html=True)
+            
+            # --- TOP PERFORMERS AT EACH LEVEL ---
+            st.markdown("### Top 5 by Spend at Each Level")
+            st.caption("Data is aggregated across all campaigns (rolled up by entity).")
+            
+            # Create tabs for each level
+            available_levels = [l for l in level_order if l in structure_data]
+            if available_levels:
+                tabs = st.tabs([level_names[l] for l in available_levels])
+                
+                for tab, level in zip(tabs, available_levels):
+                    with tab:
+                        data = structure_data[level]
+                        top_5 = data['top_5']
+                        sales_col = data['sales_col']
+                        
+                        if top_5:
+                            # Determine the name column
+                            if level == 'campaigns':
+                                name_col = 'Campaign Name'
+                            elif level == 'ad_groups':
+                                name_col = 'Ad Group Name'
+                            elif level == 'asins':
+                                name_col = 'Title'
+                            elif level == 'targets':
+                                name_col = data.get('target_col', 'Target')
+                            else:
+                                name_col = 'Search Term'
+                            
+                            # Build display data
+                            display_data = []
+                            for i, item in enumerate(top_5, 1):
+                                name = item.get(name_col, item.get('ASIN', 'Unknown'))
+                                spend = item.get('Spend', 0)
+                                sales = item.get(sales_col, 0)
+                                roas = item.get('ROAS', 0)
+                                spend_pct = (spend / data['total_spend'] * 100) if data['total_spend'] > 0 else 0
+                                
+                                # Build row based on level type
+                                if level == 'asins':
+                                    asin = item.get('ASIN', '')
+                                    sku = item.get('SKU', '')
+                                    row = {
+                                        'Rank': i,
+                                        'ASIN': asin,
+                                        'Product Title': str(name),
+                                        'Spend': f"${spend:,.0f}",
+                                        '% of Level': f"{spend_pct:.1f}%",
+                                        'Sales': f"${sales:,.0f}",
+                                        'ROAS': f"{roas:.2f}x" if pd.notna(roas) and roas > 0 else "-"
+                                    }
+                                    if sku:
+                                        row['SKU'] = sku
+                                    display_data.append(row)
+                                else:
+                                    display_data.append({
+                                        'Rank': i,
+                                        'Name': str(name),
+                                        'Spend': f"${spend:,.0f}",
+                                        '% of Level': f"{spend_pct:.1f}%",
+                                        'Sales': f"${sales:,.0f}",
+                                        'ROAS': f"{roas:.2f}x" if pd.notna(roas) and roas > 0 else "-"
+                                    })
+                            
+                            display_df = pd.DataFrame(display_data)
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                            
+                            # Summary stats
+                            top_5_spend = sum(item.get('Spend', 0) for item in top_5)
+                            top_5_pct = (top_5_spend / data['total_spend'] * 100) if data['total_spend'] > 0 else 0
+                            st.markdown(f"*Top 5 account for **{top_5_pct:.1f}%** of total {level_names[level].lower()} spend (\\${top_5_spend:,.0f} of \\${data['total_spend']:,.0f})*")
+            
+            # --- FLOW INSIGHTS ---
+            st.markdown("### Key Structural Insights")
+            
+            flow_insights = []
+            
+            # Enabled campaign summary
+            if 'campaigns' in structure_data:
+                camp_data = structure_data['campaigns']
+                enabled = camp_data.get('enabled_count', 0)
+                total = camp_data.get('count', 0)
+                if total > 0:
+                    paused = total - enabled
+                    if paused > 0:
+                        flow_insights.append(f"**{enabled:,}** enabled campaigns, **{paused:,}** paused/archived")
+                    else:
+                        flow_insights.append(f"All **{enabled:,}** campaigns are enabled")
+            
+            # Enabled targets per campaign
+            if 'targets' in structure_data and 'campaigns' in structure_data:
+                target_data = structure_data['targets']
+                camp_target_counts = target_data.get('campaign_target_counts', {})
+                enabled_campaigns = structure_data['campaigns'].get('enabled_count', 0)
+                enabled_targets = target_data.get('enabled_count', 0)
+                
+                if enabled_campaigns > 0 and enabled_targets > 0:
+                    avg_targets = enabled_targets / enabled_campaigns
+                    flow_insights.append(f"Average of **{avg_targets:.0f} enabled targets** per enabled campaign")
+                    
+                    # Find campaigns with very few targets
+                    if camp_target_counts:
+                        low_target_camps = [c for c, count in camp_target_counts.items() if count < 5]
+                        if low_target_camps:
+                            flow_insights.append(f"**{len(low_target_camps)}** enabled campaigns have fewer than 5 targets - consider adding more")
+            
+            # Campaign to search term ratio
+            if 'campaigns' in structure_data and 'search_terms' in structure_data:
+                camp_count = structure_data['campaigns'].get('enabled_count', structure_data['campaigns']['count'])
+                st_count = structure_data['search_terms']['count']
+                if camp_count > 0:
+                    ratio = st_count / camp_count
+                    flow_insights.append(f"Average of **{ratio:.0f} search terms** per enabled campaign")
+            
+            # Target to search term ratio
+            if 'targets' in structure_data and 'search_terms' in structure_data:
+                target_count = structure_data['targets'].get('enabled_count', structure_data['targets']['count'])
+                st_count = structure_data['search_terms']['count']
+                if target_count > 0:
+                    ratio = st_count / target_count
+                    flow_insights.append(f"Average of **{ratio:.1f} search terms** per enabled target")
+            
+            # ASIN efficiency
+            if 'asins' in structure_data:
+                asin_data = structure_data['asins']
+                enabled = asin_data.get('enabled_count', asin_data['count'])
+                efficiency = (asin_data['with_sales'] / enabled * 100) if enabled > 0 else 0
+                if efficiency < 50:
+                    flow_insights.append(f"Only **{efficiency:.0f}%** of advertised products have generated sales - review product selection")
+                elif efficiency > 80:
+                    flow_insights.append(f"**{efficiency:.0f}%** of advertised products are generating sales - strong product selection")
+            
+            # Search term efficiency
+            if 'search_terms' in structure_data:
+                st_data = structure_data['search_terms']
+                efficiency = (st_data['with_sales'] / st_data['count'] * 100) if st_data['count'] > 0 else 0
+                wasted_count = st_data['without_sales']
+                flow_insights.append(f"**{wasted_count:,}** search terms ({100-efficiency:.1f}%) have spend but no sales")
+            
+            # Target efficiency
+            if 'targets' in structure_data:
+                target_data = structure_data['targets']
+                enabled = target_data.get('enabled_count', target_data['count'])
+                efficiency = (target_data['with_sales'] / enabled * 100) if enabled > 0 else 0
+                flow_insights.append(f"**{efficiency:.0f}%** of enabled targets are converting to sales")
+            
+            # Display insights
+            if flow_insights:
+                for insight in flow_insights:
+                    st.markdown(f"- {insight}")
+            
+            # --- CAMPAIGNS WITH FEWEST TARGETS ---
+            if 'targets' in structure_data:
+                target_data = structure_data['targets']
+                camp_target_counts = target_data.get('campaign_target_counts', {})
+                camp_target_details = target_data.get('campaign_target_details', {})
+                target_col = target_data.get('target_col', 'Target')
+                sales_col = target_data.get('sales_col', 'Ad Sales')
+                
+                if camp_target_counts:
+                    st.markdown("### Enabled Campaigns with Fewest Targets")
+                    st.caption("These campaigns may benefit from additional keyword/product targeting expansion.")
+                    
+                    # Radio button to exclude remarketing campaigns
+                    exclude_remarketing = st.radio(
+                        "Filter Options:",
+                        options=["Include All Campaigns", "Exclude Remarketing Campaigns"],
+                        index=0,
+                        horizontal=True,
+                        key="fewest_targets_exclude_remarketing"
+                    )
+                    
+                    # Filter campaigns based on selection
+                    filtered_camp_counts = camp_target_counts.copy()
+                    if exclude_remarketing == "Exclude Remarketing Campaigns":
+                        # Exclude campaigns where name contains 'remarketing' (case insensitive)
+                        filtered_camp_counts = {
+                            camp: count for camp, count in camp_target_counts.items()
+                            if 'remarketing' not in camp.lower()
+                        }
+                    
+                    # Sort campaigns by target count (ascending) to find those with fewest targets
+                    sorted_camps = sorted(filtered_camp_counts.items(), key=lambda x: x[1])
+                    lowest_5 = sorted_camps[:5]
+                    
+                    if lowest_5:
+                        for camp_name, target_count in lowest_5:
+                            with st.expander(f"**{camp_name}** ({target_count} targets)", expanded=False):
+                                # Show top 5 targets by spend for this campaign
+                                camp_details = camp_target_details.get(camp_name, [])
+                                if camp_details:
+                                    # Filter out remarketing targets if option selected
+                                    if exclude_remarketing == "Exclude Remarketing Campaigns":
+                                        camp_details = [
+                                            t for t in camp_details
+                                            if 'remarketing' not in str(t.get(target_col, t.get('Target', ''))).lower()
+                                        ]
+                                    
+                                    display_data = []
+                                    for t in camp_details:
+                                        target_name = t.get(target_col, t.get('Target', 'Unknown'))
+                                        spend = t.get('Spend', 0)
+                                        sales = t.get(sales_col, t.get('Ad Sales', 0))
+                                        roas = sales / spend if spend > 0 else 0
+                                        display_data.append({
+                                            'Target': target_name[:50] + '...' if len(str(target_name)) > 50 else target_name,
+                                            'Spend': f"${spend:,.2f}",
+                                            'Sales': f"${sales:,.2f}",
+                                            'ROAS': f"{roas:.2f}x" if roas > 0 else "N/A"
+                                        })
+                                    if display_data:
+                                        st.dataframe(pd.DataFrame(display_data), use_container_width=True, hide_index=True)
+                                    else:
+                                        st.caption("No target performance data available (after filtering).")
+                                else:
+                                    st.caption("No target performance data available.")
+                    else:
+                        st.info("No campaigns found matching the filter criteria.")
+        else:
+            st.info("Upload advertising data to visualize your account structure.")
+            
+    except Exception as e:
+        st.warning(f"Unable to generate account structure visualization: {str(e)}")
+        if st.session_state.get('global_debug_mode', False):
+            import traceback
+            st.code(traceback.format_exc())
 
 # Display the application information in an expander at the very bottom
 with st.expander("📊 Application Information", expanded=False):

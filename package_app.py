@@ -82,8 +82,20 @@ def create_spec_file():
 
 block_cipher = None
 
-from PyInstaller.utils.hooks import copy_metadata, collect_data_files
+from PyInstaller.utils.hooks import copy_metadata, collect_data_files, collect_submodules
 import os
+
+# Collect all pyarrow data files for Arrow IPC (needed for dataframe interactivity)
+try:
+    pyarrow_datas = collect_data_files('pyarrow')
+except Exception:
+    pyarrow_datas = []
+
+# Collect streamlit column_config for dataframe column features
+try:
+    streamlit_elements_datas = collect_data_files('streamlit.elements')
+except Exception:
+    streamlit_elements_datas = []
 
 a = Analysis(
     ['run_dashboard.py'],
@@ -97,8 +109,11 @@ a = Analysis(
         copy_metadata('pandas') +
         copy_metadata('plotly') +
         copy_metadata('openpyxl') +
+        copy_metadata('pyarrow') +
         collect_data_files('streamlit') +
-        collect_data_files('plotly') + [
+        collect_data_files('plotly') +
+        pyarrow_datas +
+        streamlit_elements_datas + [
             ('assets', 'assets'),
             ('.streamlit', '.streamlit'),
             ('app.py', '.'),
@@ -159,6 +174,20 @@ a = Analysis(
         'httpx',
         'database',
         'supabase_store',
+        'pyarrow',
+        'pyarrow.lib',
+        'pyarrow.vendored',
+        'pyarrow.vendored.version',
+        'pyarrow._compute',
+        'pyarrow._csv',
+        'pyarrow._feather',
+        'pyarrow._fs',
+        'pyarrow._json',
+        'pyarrow._parquet',
+        'pyarrow.ipc',
+        'streamlit.elements.arrow',
+        'streamlit.elements.dataframe_selector',
+        'streamlit.type_util',
     ],
     hookspath=[],
     hooksconfig={},
